@@ -570,3 +570,166 @@ total_train_time_model_2 = print_train_time(
 total_train_time_model_2
 total_train_time_model_1
 total_train_time_model_0
+
+
+### Make and evaluate random predictions with best model
+
+def make_predictions(model: torch.nn.Module,
+                     data: list,
+                     device: torch.device = device):
+    pred_probs = []
+    model.eval()
+    with torch.inference_mode():
+        for sample in data:
+            # Add an extra dimension and send samplt to device
+            sample = torch.unsqueeze(sample,
+                                     dim = 0).to(device)
+            
+            # Forward pass (model outputs raw logit)
+            pred_logit = model(sample)
+
+            # Get prediction probability (logit -> prediction probability)
+            pred_prob = torch.softmax(pred_logit.squeeze(), 
+                                      dim = 0)
+            
+            # Get pred_prob off GPU for further calculations
+            pred_probs.append(pred_prob.cpu())
+
+    return torch.stack(pred_probs)
+
+import random
+random.seed(42)
+test_samples = []
+test_labels = []
+for sample, label in random.sample(list(test_data),
+                                   k = 9):
+    test_samples.append(sample)
+    test_labels.append(label)
+
+
+print(f"Test sample image shape: {test_samples[0].shape}\nTest sample label: {test_labels[0]} ({class_names[test_labels[0]]})")
+
+pred_probs = make_predictions(model = model_2,
+                              data = test_samples)
+
+pred_probs[:2]
+pred_probs[0:2,]
+
+# Turn the prediction probabilities into prediction labels by taking the argmax()
+pred_classes = pred_probs.argmax(dim=1)
+pred_classes
+
+test_labels, pred_classes
+
+
+# Plot predictions
+plt.figure(figsize=(9, 9))
+nrows = 3
+ncols = 3
+for i, sample in enumerate(test_samples):
+  # Create a subplot
+  plt.subplot(nrows, ncols, i+1)
+
+  # Plot the target image
+  plt.imshow(sample.squeeze(), cmap="gray")
+
+  # Find the prediction label (in text form, e.g. "Sandal")
+  pred_label = class_names[pred_classes[i]]
+
+  # Get the truth label (in text form, e.g. "T-shirt")
+  truth_label = class_names[test_labels[i]] 
+
+  # Create the title text of the plot
+  title_text = f"Pred: {pred_label} | Truth: {truth_label}"
+  
+  # Check for equality and change title colour accordingly
+  if pred_label == truth_label:
+      plt.title(title_text, fontsize=10, c="g") # green text if correct
+  else:
+      plt.title(title_text, fontsize=10, c="r") # red text if wrong
+  plt.axis(False);
+
+plt.show()
+
+
+
+### Making a confusion matrix
+
+from tqdm.auto import tqdm
+
+# 1. Make predictions with trained model
+y_preds = []
+model_2.eval()
+with torch.inference_mode():
+    for X, y in tqdm(test_dataloader, desc="Make predictions"):
+
+        # Send data and targets to device
+        X, y = X.to(device), y.to(device)
+
+        # Forward pass
+        y_logit = model_2(X)
+
+        # Turn predictions from logits -> prediction probabilites -> predictions labels
+        y_pred = torch.softmax(y_logit, dim=1).argmax(dim=1)
+
+        # Put predictions on CPU for evaluation
+        y_preds.append(y_pred.cpu())
+
+
+# Concatenate list of predictions into a tensor
+y_pred_tensor = torch.cat(y_preds)
+
+from torchmetrics import ConfusionMatrix
+from mlxtend.plotting import plot_confusion_matrix
+
+confmat = ConfusionMatrix(num_classes = len(class_names),
+                          task = 'multiclass')
+confmat_tensor = confmat(preds = y_pred_tensor,
+                         target = test_data.targets)
+
+fig, ax = plot_confusion_matrix(
+    conf_mat=confmat_tensor.numpy(),
+    class_names=class_names,
+    figsize = (10,7)
+);
+
+fig.show()
+ax
+
+
+### Save and reload model
+
+from pathlib import Path
+
+MODEL_PATH = Path("models")
+MODEL_NAME = "03_pytorch_computer_vision_model_2.pth"
+MODEL_SAVE_PATH = MODEL_PATH / MODEL_NAME
+
+torch.save(obj=model_2.state_dict(),
+           f=MODEL_SAVE_PATH)
+
+
+# Loading from state dict means we need to create an
+# instance of our model. state_dict() is essentially
+# the set of learned parameters for said model, that
+# will be imputed.
+
+loaded_model_2 = FashionMNISTModelV2(input_shape = 1,
+                                     hidden_units = 10,
+                                     output_shape = 10)
+
+loaded_model_2.load_state_dict(torch.load(f=MODEL_SAVE_PATH))
+
+loaded_model_2 = loaded_model_2.to(device)
+
+# Evaluate model to make sure its all good
+torch.manual_seed(42)
+
+loaded_model_2_results = eval_model(
+    model=loaded_model_2,
+    data_loader=test_dataloader,
+    loss_fn=loss_fn,
+    accuracy_fn=accuracy_fn
+)
+
+loaded_model_2_results
