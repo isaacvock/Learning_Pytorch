@@ -155,3 +155,116 @@ train_dataloader, test_dataloader
 
 
 ### Option 2: We could use a Custom Dataset
+
+# Load dependencies 
+import os # For dealing with directories
+import pathlib # for dealing with filepaths
+import torch # for all things Pytorch
+
+from PIL import Image # For loading images
+from torch.utils.data import Dataset # to subclass and create our own Dataset
+from torchvision import transforms # to turn our images into tensors
+from typing import Tuple, Dict, List # to add hints to our code
+
+# Get class names from target directory
+target_directory = train_dir
+class_names_found = sorted([entry.name for entry in list(os.scandir(image_path / "train"))])
+
+# Generalize as a function
+def find_classes(directory: str) -> Tuple[List[str], Dict[str, int]]:
+    """Finds the class folder names in a target directory.
+    
+    Assumes target directory is in standard image classification format.
+
+    Args:
+        directory (str): target directory to load classnames from.
+
+    Returns:
+        Tuple[List[str], Dict[str, int]]: (list_of_class_names, dict(class_name: idx...))
+    
+    Example:
+        find_classes("food_images/train")
+        >>> (["class_1", "class_2"], {"class_1": 0, ...})
+    """
+    # 1. Get the class names by scanning the target directory
+    classes = sorted(entry.name for entry in os.scandir(directory) if entry.is_dir()) 
+
+    # 2. Raise an error if class names not found
+    if not classes:
+        raise FileNotFoundError(f"Couldn't find any classes in {directory}.")
+    
+    class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
+
+    return classes, class_to_idx
+
+find_classes(train_dir)
+
+## Create a custom Dataset to replicate ImageFolder
+
+# Step 1: Subclass torch.utils.data.Dataset
+class ImageFolderCustom(Dataset):
+
+    # Step 2: Initalize with a target directory and transform parameter
+    def __init__(self, targ_dir: str, transform = None) -> None:
+
+        # Step 3: Create class attributes
+
+        # Get all image paths
+            # NOTE: hardcoding the file type here
+        self.paths = list(pathlib.Path(targ_dir).glob("*/*.jpg"))
+        # Setup transforms
+        self.transform = transform
+        # Create classes and class_to_idx attributes
+        self.classes, self.class_to_idx = find_classes(targ_dir)
+
+    # Step 4: Make function to load images
+    def load_image(self, index: int) -> Image.Image:
+        "Opens an image via a path and returns it."
+        image_path = self.paths[index]
+        return Image.open(image_path)
+    
+    # Step 5: overwrite the __len__() method (optional but recommended)
+    def __len__(self) -> int:
+        "Returns the total number of samples"
+        return len(self.paths)
+    
+    # Step 6: Overwrite the __getitem__() method (required)
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, int]:
+        "Returns one sample of data, data and label (X, y)"
+        img = self.load_image(index)
+        class_name = self.paths[index].parent.name
+        class_idx = self.class_to_idx[class_name]
+
+        # Transform if necessary, and return (data, label)
+        if self.transform:
+            return self.transform(img), class_idx
+        else:
+            return img, class_idx
+        
+# Create some transforms to prep images
+train_transforms = transforms.Compose([
+    transforms.Resize((64, 64)),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.ToTensor()
+])
+
+# Only reshape test data
+test_transforms = transforms.Compose([
+    transforms.Resize((64, 64)),
+    transforms.ToTensor()
+])
+
+# Turn training and testing images into Datasets using our custom class
+train_data_custom = ImageFolderCustom(targ_dir = train_dir,
+                                      transform = train_transforms)
+test_data_custom = ImageFolderCustom(targ_dir = test_dir,
+                                     transform = test_transforms)
+
+train_data_custom, test_data_custom
+
+
+# Did it work?
+len(train_data_custom), len(test_data_custom)
+
+train_data_custom.classes
+train_data_custom.class_to_idx
