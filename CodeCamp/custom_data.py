@@ -268,3 +268,21 @@ len(train_data_custom), len(test_data_custom)
 
 train_data_custom.classes
 train_data_custom.class_to_idx
+
+### Turn custom loaded images into DataLoaders
+
+# Turn train and test custom Datasets into DataLoaders
+    # Our custom class is a subclass of torch.utils.data.Dataset
+    # so we can just call DataLoader
+from torch.utils.data import DataLoader
+train_dataloader_custom = DataLoader(dataset = train_data_custom,
+                                     batch_size =1 ,
+                                     num_workers = 0,
+                                     shuffle=True)
+
+test_dataloader_custom = DataLoader(dataset=test_data_custom, # use custom created test Dataset
+                                    batch_size=1, 
+                                    num_workers=0, 
+                                    shuffle=False) # don't usually need to shuffle testing data
+
+train_dataloader_custom, test_dataloader_custom
