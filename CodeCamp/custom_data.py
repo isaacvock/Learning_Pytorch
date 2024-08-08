@@ -1,5 +1,7 @@
 import torch
 from torch import nn
+import numpy as np
+import matplotlib.pyplot as plt
 
 # Setup device-agnostic code
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -286,3 +288,138 @@ test_dataloader_custom = DataLoader(dataset=test_data_custom, # use custom creat
                                     shuffle=False) # don't usually need to shuffle testing data
 
 train_dataloader_custom, test_dataloader_custom
+
+img_custom, label_custom = next(iter(train_dataloader_custom))
+
+
+### Data augmentation
+
+## Incorporating TrivialAugmentWide()
+from torchvision import transforms
+
+train_transforms = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.TrivialAugmentWide(num_magnitude_bins=31),
+    transforms.ToTensor()
+])
+
+# Don't need to augment the test set
+test_transforms = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor()
+])
+
+# Plot a random image
+image_path_list = list(image_path.glob("*/*/*.jpg"))
+plot_transformed_images(
+    image_paths=image_path_list,
+    transform=train_transforms,
+    n=3,
+    seed=None
+)
+
+
+##### MODEL 0: TinyVGG without data augmentation
+
+### Creating transforms and loading data for Model 0
+simple_transform = transforms.Compose([
+    transforms.Resize((64, 64)),
+    transforms.ToTensor(),
+])
+
+
+# 1) Turn each training and test folder into a Dataset
+from torchvision import datasets
+train_data_simple = datasets.ImageFolder(root=train_dir,
+                                         transform=simple_transform)
+test_data_simple = datasets.ImageFolder(root=test_dir,
+                                        transform=simple_transform)
+
+# 2) Turn data into DataLoaders
+import os
+from torch.utils.data import DataLoader
+
+BATCH_SIZE = 32
+NUM_WORKERS = os.cpu_count()
+
+train_dataloader_simple = DataLoader(train_data_simple,
+                                     batch_size=BATCH_SIZE,
+                                     shuffle=True,
+                                     num_workers=NUM_WORKERS)
+
+test_dataloader_simple = DataLoader(test_data_simple,
+                                    batch_size=BATCH_SIZE,
+                                    shuffle=False,
+                                    num_workers=NUM_WORKERS)
+
+
+# 3) Create TinyVGG model class
+class TinyVGG(nn.Module):
+    def __init__(self, 
+                 input_shape: int,
+                 hidden_units: int,
+                 output_shape: int) -> None:
+        super().__init__()
+        self.conv_block_1 = nn.Sequential(
+            nn.Conv2d(in_channels=input_shape,
+                      out_channels=hidden_units,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=hidden_units,
+                      out_channels=hidden_units,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2,
+                         stride=2)
+        )
+        self.conv_block_2 = nn.Sequential(
+            nn.Conv2d(hidden_units, hidden_units, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(hidden_units, hidden_units, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2)
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            # Where did this in_features shape come from? 
+            # It's because each layer of our network compresses and changes the shape of our inputs data.
+            nn.Linear(in_features=hidden_units*16*16,
+                      out_features=output_shape)
+        )
+
+    def forward(self, x:torch.Tensor):
+        x = self.conv_block_1(x)
+        x = self.conv_block_2(x)
+        x = self.classifier(x)
+        return x
+    
+torch.manual_seed(42)
+model_0 = TinyVGG(input_shape=3, # number of color channels (3 for RGB) 
+                  hidden_units=10, 
+                  output_shape=len(train_data.classes)).to(device)
+model_0
+
+
+# 4) Test model by running forward pass on a single image
+
+# a) Get a batch of images and labels from the DataLoader
+img_batch, label_batch = next(iter(train_dataloader_simple))
+
+# b) Get a single image from the batch and unsqueeze so it fits model shape
+img_single, label_single = img_batch[0].unsqueeze(dim=0), label_batch[0]
+print(f"Single image shape: {img_single.shape}\n")
+
+# c) Perform forward pass on single image
+model_0.eval()
+with torch.inference_mode():
+    pred = model_0(img_single.to(device))
+
+# d) Convert model logits to predicted labels
+print(f"Output logits:\n{pred}\n")
+print(f"Output prediction probabilities:\n{torch.softmax(pred, dim=1)}\n")
+print(f"Output prediction label:\n{torch.argmax(torch.softmax(pred, dim=1), dim=1)}\n")
+print(f"Actual label:\n{label_single}")
