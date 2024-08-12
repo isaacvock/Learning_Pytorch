@@ -395,10 +395,7 @@ class TinyVGG(nn.Module):
         )
 
     def forward(self, x:torch.Tensor):
-        x = self.conv_block_1(x)
-        x = self.conv_block_2(x)
-        x = self.classifier(x)
-        return x
+        return (self.classifier(self.conv_block_2(self.conv_block_1(x))))
     
 torch.manual_seed(42)
 model_0 = TinyVGG(input_shape=3, # number of color channels (3 for RGB) 
@@ -564,7 +561,6 @@ def train(model: torch.nn.Module,
 # 6) TRAIN AND EVALUATE MODEL 0
 
 # 92 second training time with cuda
-device = "cpu"
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
 
@@ -592,5 +588,145 @@ model_0_results = train(model=model_0,
                         loss_fn=loss_fn,
                         epochs=NUM_EPOCHS)
 
+end_time = timer()
+print(f"Total training time: {end_time-start_time:.3f} seconds")
+
+
+
+# 6) PLOT LOSS CURVES
+
+model_0_results.keys()
+
+# Going to plot loss curves
+def plot_loss_curves(results: Dict[str, List[float]]):
+    """Plots training curves of a results dictionary
+
+    Args:
+        results (dict): dictionary containing list of values, e.g.
+            {"train_loss": [...],
+             "train_acc": [...],
+             "test_loss": [...],
+             "test_acc": [...]}
+    """
+
+    # Get the loss values of the results dictionary (training and test)
+    loss = results['train_loss']
+    test_loss = results['test_loss']
+
+    # Get the accuracy values of the results dictionary (training and test)
+    accuracy = results['train_acc']
+    test_accuracy = results['test_acc']
+
+    # Figure out how many epochs there were
+    epochs = range(len(results['train_loss']))
+
+    # Setup a plot
+    plt.figure(figsize=(15, 7))
+
+    # Plot loss
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, loss, label='train_loss')
+    plt.plot(epochs, test_loss, label='test_loss')
+    plt.title('Loss')
+    plt.xlabel('Epochs')
+    plt.legend()
+
+    # Plot accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, accuracy, label = 'train_accuracy')
+    plt.plot(epochs, test_accuracy, label='test_accuracy')
+    plt.title('Accuracy')
+    plt.xlabel('Epochs')
+    plt.legend();
+
+    plt.show()
+
+
+plot_loss_curves(model_0_results)
+
+
+
+###### MODEL 1: TINYVGG WITH DATA AUGMENTATION
+
+### Create transform with data augmentation
+
+# Add TrivialAugment() to training transform
+train_transform_trivial_argument = transforms.Compose([
+    transforms.Resize((64, 64)),
+    transforms.TrivialAugmentWide(num_magnitude_bins=31),
+    transforms.ToTensor()
+])
+
+# Create testing transform
+test_transform = transforms.Compose([
+    transforms.Resize((64, 64)),
+    transforms.ToTensor()
+])
+
+
+### Create new Dataset's and DataLoaders with this transform
+
+# DATASET
+train_data_augmented = datasets.ImageFolder(train_dir, 
+                                            transform = train_transform_trivial_argument)
+
+test_data_simple = datasets.ImageFolder(test_dir,
+                                        transform=test_transform)
+
+train_data_augmented, test_data_simple
+
+# DATALOADER
+import os
+BATCH_SIZE = 32
+NUM_WORKERS = os.cpu_count()
+
+torch.manual_seed(42)
+train_dataloader_augmented = DataLoader(train_data_augmented,
+                                        batch_size = BATCH_SIZE,
+                                        shuffle=True,
+                                        num_workers=NUM_WORKERS)
+
+test_dataloader_simple = DataLoader(test_data_simple,
+                                    batch_size=BATCH_SIZE,
+                                    shuffle=False,
+                                    num_workers=NUM_WORKERS)
+
+train_dataloader_augmented, train_dataloader_simple
+
+# Create new model
+torch.manual_seed(42)
+model_1 = TinyVGG(
+    input_shape=3,
+    hidden_units=10,
+    output_shape=len(train_data_augmented.classes)
+).to(device)
+model_1
+
+# Train!
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
+
+# Set number of epochs
+NUM_EPOCHS = 5
+
+# Setup loss function and optimizer
+loss_fn = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(params=model_1.parameters(), lr=0.001)
+
+# Start the timer
+from timeit import default_timer as time
+start_time = timer()
+
+# Train model_1
+model_1_results = train(
+    model = model_1,
+    train_dataloader=train_dataloader_augmented,
+    test_dataloader=test_dataloader_simple,
+    optimizer=optimizer,
+    loss_fn=loss_fn,
+    epochs=NUM_EPOCHS
+)
+
+# End the timer and print out how long it took
 end_time = timer()
 print(f"Total training time: {end_time-start_time:.3f} seconds")
