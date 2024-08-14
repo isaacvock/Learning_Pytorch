@@ -730,3 +730,78 @@ model_1_results = train(
 # End the timer and print out how long it took
 end_time = timer()
 print(f"Total training time: {end_time-start_time:.3f} seconds")
+
+
+
+##### MAKING PREDICTIONS ON CUSTOM DATA
+
+# Download custom image
+import requests
+
+# Setup custom image path
+custom_image_path = data_path / "04-pizza-dad.jpeg"
+
+# Download the image if it doesn't already exist
+if not custom_image_path.is_file():
+    with open(custom_image_path, "wb") as f:
+        # When downloading from GitHub, need to use the "raw" file link
+        request = requests.get("https://raw.githubusercontent.com/mrdbourke/pytorch-deep-learning/main/images/04-pizza-dad.jpeg")
+        print(f"Downloading {custom_image_path}...")
+        f.write(request.content)
+else:
+    print(f"{custom_image_path} already exists, skipping download.")
+
+
+
+import torchvision
+
+### Read in custom image
+
+# Read in custom image
+custom_image_uint8 = torchvision.io.read_image(str(custom_image_path))
+
+# Print out image data
+print(f"Custom image tensor:\n{custom_image_uint8}\n")
+print(f"Custom image shape: {custom_image_uint8.shape}\n")
+print(f"Custom image dtype: {custom_image_uint8.dtype}")
+
+
+## Current image has values between 0 and 255, but our model only works with
+## values between 0 and 1 for some reason
+
+# Load in custom image and convert the tensor values to float32
+custom_image = torchvision.io.read_image(str(custom_image_path)).type(torch.float32)
+
+# Normalize pixel values
+custom_image = custom_image / 255
+
+
+### Predicting on custom images with trained model
+
+# Shape is still wrong
+custom_image_transform = transforms.Compose([
+    transforms.Resize((64, 64))
+])
+
+# Transform image
+custom_image_transformed = custom_image_transform(custom_image)
+
+
+print(f"Original shape: {custom_image.shape}")
+print(f"New shape: {custom_image_transformed.shape}")
+
+# Let's make a prediction
+model_1.eval()
+with torch.inference_mode():
+
+    # Model expects a batch dimension
+    # Make a prediction
+    custom_image_pred = model_1(custom_image_transformed.unsqueeze(dim=0).to(device))
+
+
+custom_prediction = custom_image_pred.argmax(dim=1)
+
+custom_image_pred
+
+class_names = train_data.classes
+class_names[custom_prediction.cpu()]
