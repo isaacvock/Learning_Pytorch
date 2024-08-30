@@ -17,7 +17,7 @@ from helper_functions import download_data, set_seeds, plot_loss_curves
 device = "cuda" if torch.cuda.is_available() else "cpu"
 device
 
-### STEP 1: Download data (already done)
+##### STEP 1: Download data (already done)
 
 image_path = download_data(source="https://github.com/mrdbourke/pytorch-deep-learning/raw/main/data/pizza_steak_sushi.zip",
                            destination="pizza_steak_sushi")
@@ -27,7 +27,7 @@ train_dir = image_path / "train"
 test_dir = image_path / "test"
 
 
-### STEP 2: Create datasets and DataLoaders
+##### STEP 2: Create datasets and DataLoaders
 
 # Transforms for image
 IMG_SIZE = 224
@@ -46,5 +46,22 @@ train_dataloader, test_dataloader, class_names = data_setup.create_dataloaders(
 )
 
 
-### STEP 3: Read the paper; understand the architecture
+##### STEP 3: Read the paper; understand the architecture
+
+### COMPONENT 1: PATCH EMBEDDING
+
+# Create exmaple values
+height = 224
+width = 224
+color_channels = 3
+patch_size = 16
+
+# Calculate N (number of patches)
+number_of_patches = (width * height) / (patch_size ** 2)
+
+# Input: 2D image of size H x W x C
+# Output: flattened 2D patches with size N x (P^2 * C)
+embedding_layer_input_shape = (height, width, color_channels)
+embedding_layer_output_shape = (number_of_patches,
+                                patch_size**2 * color_channels)
 
