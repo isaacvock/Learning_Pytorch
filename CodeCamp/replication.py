@@ -80,9 +80,73 @@ print(f"Output shape (single 2D image flattened into patches): {embedding_layer_
 ## Patch embedding is really just a CNN
 from torch import nn
 
-patch_size = 6
+patch_size = 16
 conv2d = nn.Conv2d(in_channels=3,
                    out_channels=768,
                    kernel_size=patch_size,
                    stride=patch_size,
                    padding=0)
+
+# Can pass image through this layer to get set of
+# patches
+image_out_of_conv = conv2d(image.unsqueeze(0))
+print(image_out_of_conv.shape)
+
+# Flatten patch embedding with Flatten()
+# Goal dimension: 196 x 768
+# we need to turn 14x14 image into 196 element vector
+    # Only want to flattend th "spatial" dimension
+
+flatten = nn.Flatten(start_dim=2,
+                     end_dim=3)
+
+image_out_of_conv_flattened = flatten(image_out_of_conv)
+
+# Need to transpose this tensor, effectively
+image_out_of_conv_flattened_reshaped = image_out_of_conv_flattened.permute(0, 2, 1)
+
+
+## Make it a Pytorch module!
+
+class PatchEmbedding(nn.Module):
+
+    def __init__(self, 
+                 in_channels: int=3,
+                 patch_size: int=16,
+                 embedding_dim:int=768):
+        
+        super().__init__()
+
+        # Turn image into patches
+        self.patcher = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=embedding_dim,
+            kernel_size=patch_size,
+            stride=patch_size,
+            padding=0
+        )
+
+        # Layer to flatten
+        self.flatten = nn.Flatten(start_dim=2,
+                                  end_dim = 3)
+        
+    # Forward pass
+    def forward(self, x):
+        # Check that inputs are write shape
+        image_resolution = x.shape[-1]
+        assert image_resolution % patch_size == 0, f"Input image must be divisible by patch size, image shape: {image_resolution}, patch_size: {patch_size}"
+
+        # Perform forward pass
+        x_patched = self.patcher(x)
+        x_flattened = self.flatten(x_patched)
+
+        return x_flattened.permute(0, 2, 1)
+    
+
+# test out model on single image
+patchify = PatchEmbedding()
+patch_embedded_image = patchify(image.unsqueeze(0)) # Need to add extra batch dimension I guess
+print(f"Output patch embedding shape: {patch_embedded_image.shape}")
+
+
+### COMPONENT 2: CLASS TOKEN EMBEDDING
