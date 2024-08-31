@@ -46,6 +46,15 @@ train_dataloader, test_dataloader, class_names = data_setup.create_dataloaders(
 )
 
 
+# Get a batch of images
+image_batch, label_batch = next(iter(train_dataloader))
+
+# Get a single image from the batch
+image, label = image_batch[0], label_batch[0]
+
+# View the batch shapes
+image.shape, label
+
 ##### STEP 3: Read the paper; understand the architecture
 
 ### COMPONENT 1: PATCH EMBEDDING
@@ -65,3 +74,15 @@ embedding_layer_input_shape = (height, width, color_channels)
 embedding_layer_output_shape = (number_of_patches,
                                 patch_size**2 * color_channels)
 
+print(f"Input shape (single 2D image): {embedding_layer_input_shape}")
+print(f"Output shape (single 2D image flattened into patches): {embedding_layer_output_shape}")
+
+## Patch embedding is really just a CNN
+from torch import nn
+
+patch_size = 6
+conv2d = nn.Conv2d(in_channels=3,
+                   out_channels=768,
+                   kernel_size=patch_size,
+                   stride=patch_size,
+                   padding=0)
