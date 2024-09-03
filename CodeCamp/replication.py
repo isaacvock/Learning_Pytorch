@@ -150,3 +150,48 @@ print(f"Output patch embedding shape: {patch_embedded_image.shape}")
 
 
 ### COMPONENT 2: CLASS TOKEN EMBEDDING
+# Class token is a cheap way to perform flexible 
+# classification without requiring a fully connected
+# layer at the end for classification. Just prepend
+# some token that will be learned and used as the
+# classifier to the image.
+
+batch_size = patch_embedded_image.shape[0]
+embedding_dimension = patch_embedded_image.shape[-1]
+
+# Needs to be same size as emedding dimension
+class_token = nn.Parameter(
+    torch.randn(batch_size, 1, embedding_dimension),
+    requires_grad=True
+)
+
+patch_embedded_image_with_class_embedding = torch.cat(
+    (class_token, patch_embedded_image),
+    dim = 1
+)
+
+### COMPONENT 3: POSITION EMBEDDING
+# Something to specify ordering of patches. In this
+# paper, they found that a fancy 2D position embedding
+# (i.e., I assume something that tells the model the
+# relative x and y positions of each patch) didn't
+# outperform a simple 1D embedding (just giving the
+# patches a sequential single numeric ID).
+
+# Number of patches
+number_of_patches = int((height * width) / patch_size**2)
+
+# Embedding dimension
+embedding_dimension = patch_embedded_image_with_class_embedding.shape[2]
+
+# Create learnable 1D position embedding
+position_embedding = nn.Parameter(
+    torch.randn(1,
+               number_of_patches + 1,
+               embedding_dimension),
+    requires_grad=True    
+)
+
+
+# Add them to our embedding
+patch_and_position_embedding = patch_embedded_image_with_class_embedding + position_embedding
