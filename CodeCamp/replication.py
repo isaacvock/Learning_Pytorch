@@ -195,3 +195,105 @@ position_embedding = nn.Parameter(
 
 # Add them to our embedding
 patch_and_position_embedding = patch_embedded_image_with_class_embedding + position_embedding
+
+
+
+### COMPONENT 4: Multi-Head Attention (MSA)
+
+class MultiheadSelfAttentionBlock(nn.Module):
+
+    def __init__(self,
+                 embedding_dim:int=768,
+                 num_heads:int=12,
+                 attn_dropout:float=0):
+        super().__init__()
+
+        self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim)
+
+        self.multihead_attn = nn.MultiheadAttention(
+            embed_dim = embedding_dim,
+            num_heads = num_heads,
+            dropout = attn_dropout,
+            batch_first = True
+        )
+
+
+    def forward(self, x):
+        x = self.layer_norm(x)
+        attn_output, _ = self.multihead_attn(
+            query = x,
+            key = x,
+            value = x,
+            need_weights = False
+        )
+
+# Create an instance of MSABlock
+multihead_self_attention_block = MultiheadSelfAttentionBlock(embedding_dim=768, # from Table 1
+                                                             num_heads=12) # from Table 1
+  
+
+### COMPONENT 5: MULTILAYER PERCEPTRON
+
+class MLPBlock(nn.Module):
+
+    def __init__(self,
+               embedding_dim:int=768,
+               mlp_size:int=3072,
+               dropout:float=0.1):
+        super().__init__()
+
+        self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(in_features = embedding_dim,
+                      out_features = mlp_size),
+            nn.GELU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(in_features=mlp_size,
+                      out_features=embedding_dim),
+            nn.Dropout(p=dropout)
+        )
+
+    def forward(self, x):
+        x = self.layer_norm(x)
+        x = self.mlp(x)
+        return x
+    
+# Create an instance of MLPBlock
+mlp_block = MLPBlock(embedding_dim=768, # from Table 1
+                     mlp_size=3072, # from Table 1
+                     dropout=0.1) # from Table 3
+
+
+### COMPONENT 6: TRANSFORMER ENCODER
+
+class TransformerEncoderBlock(nn.Module):
+
+    def __init__(self,
+                 embedding_dim:int=768,
+                 num_heads:int=12,
+                 mlp_size:int=3072,
+                 mlp_dropout:float=0.1,
+                 attn_dropout:float=0):
+        super().__init__()
+
+        self.msa_block = MultiheadSelfAttentionBlock(
+            embedding_dim = embedding_dim,
+            num_heads=num_heads,
+            attn_dropout=attn_dropout
+        )
+
+        self.mlp_block = MLPBlock(
+            embedding_dim=embedding_dim,
+            mlp_size=mlp_size,
+            dropout=mlp_dropout
+        )
+
+    def forward(self, x):
+
+        # Residual connection for MSA block
+        x = self.msa_block(x) + x
+
+        # Residual connection for MLP block
+        x = self.mlp_block(x) + x
+
+        return x
