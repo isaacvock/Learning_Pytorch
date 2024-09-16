@@ -11,6 +11,7 @@ import polars as pl
 import gffutils as gf
 import Bio
 import os
+import sklearn as sk
 
 
 
