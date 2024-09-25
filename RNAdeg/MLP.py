@@ -33,34 +33,54 @@ simple_nn = SimpleMLP().to(device)
 ### Load data
 degdata = pd.read_csv('C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\RNAdeg_dataset.csv')
 
+cols_to_log = ['exonic_length',
+               'num_exons',
+                'fiveprimeUTR_lngth',
+                'threeprimeUTR_lngth',
+                'stop_to_lastEJ']
 
-degdata_test = degdata[degdata['seqnames'].isin( ['chr1', 'chr22'])]
-degdata_train = degdata[~degdata['seqnames'].isin(['chr1', 'chr22'])]
+for col in cols_to_log:
+    degdata[f'{col}_log'] = np.log(abs(degdata[col])+1)
+
+cols_to_standardize = ['exonic_length_log',
+                        'num_exons_log',
+                        'fiveprimeUTR_lngth_log',
+                        'threeprimeUTR_lngth_log',
+                        'stop_to_lastEJ_log',
+                        'log_ksyn',
+                        'log_kdeg']
+
+data_cols = ['exonic_length_log',
+                        'num_exons_log',
+                        'fiveprimeUTR_lngth_log',
+                        'threeprimeUTR_lngth_log',
+                        'stop_to_lastEJ_log',
+                        'log_ksyn']
+obs_col = ['log_kdeg']
+all_cols = data_cols + obs_col
+
+degdata[cols_to_standardize] = (degdata[cols_to_standardize] - degdata[cols_to_standardize].mean())/degdata[cols_to_standardize].std()
 
 
-train_tensor = torch.tensor(degdata_train[['exonic_length',
-                                   'num_exons',
-                                   'fiveprimeUTR_lngth',
-                                   'threeprimeUTR_lngth',
-                                   'stop_to_lastEJ',
-                                   'log_ksyn']].to_numpy(),
+#degdata_test = degdata[degdata['seqnames'].isin( ['chr1', 'chr22'])]
+degdata_test = degdata[degdata['seqnames'].isin( ['chr22'])]
+degdata_test = degdata_test[degdata_test.notnull]
+
+#degdata_train = degdata[~degdata['seqnames'].isin(['chr1', 'chr22'])]
+degdata_train = degdata[degdata['seqnames'].isin( ['chr21'])]
+degdata_train = degdata_train[degdata_train.notnull]
+
+
+train_tensor = torch.tensor(degdata_train[data_cols].to_numpy(),
                                    dtype=torch.float32)
-train_label = torch.tensor(degdata_train[['log_kdeg']].to_numpy(),
+train_label = torch.tensor(degdata_train[obs_col].to_numpy(),
                            dtype=torch.float32)
 
 
-test_tensor = torch.tensor(degdata_test[['exonic_length',
-                                   'num_exons',
-                                   'fiveprimeUTR_lngth',
-                                   'threeprimeUTR_lngth',
-                                   'stop_to_lastEJ',
-                                   'log_ksyn']].to_numpy(),
+test_tensor = torch.tensor(degdata_test[data_cols].to_numpy(),
                                    dtype=torch.float32)
-test_label = torch.tensor(degdata_test[['log_kdeg']].to_numpy(),
+test_label = torch.tensor(degdata_test[obs_col].to_numpy(),
                            dtype=torch.float32)
-
-### Should standardize features to avoid overflow when calculating MSE
-
 
 
 ### Train the model!
@@ -78,6 +98,21 @@ test_tensor, test_label = test_tensor.to(device), test_label.to(device)
 def mse_fn(lkdeg_true, lkdeg_pred):
     mse = sum((lkdeg_true - lkdeg_pred) ** 2)/len(lkdeg_true)
     return mse
+
+
+### Gut check to see if my model works
+testlin = nn.Linear(in_features = 6, out_features = 20).to(device)
+testlin2 = nn.Linear(in_features = 20, out_features = 20).to(device)
+testlin3 = nn.Linear(in_features = 20, out_features = 1).to(device)
+testrelu = nn.ReLU().to(device)
+
+testlin(train_tensor)
+testrelu(testlin(train_tensor))
+testlin2(testrelu(testlin(train_tensor)))
+testrelu(testlin2(testrelu(testlin(train_tensor))))
+testlin3(testrelu(testlin2(testrelu(testlin(train_tensor)))))
+
+### Train
 
 for epoch in range(epochs):
     # 1. Forward pass
