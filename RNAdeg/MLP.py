@@ -62,13 +62,13 @@ all_cols = data_cols + obs_col
 degdata[cols_to_standardize] = (degdata[cols_to_standardize] - degdata[cols_to_standardize].mean())/degdata[cols_to_standardize].std()
 
 
-#degdata_test = degdata[degdata['seqnames'].isin( ['chr1', 'chr22'])]
-degdata_test = degdata[degdata['seqnames'].isin( ['chr22'])]
-degdata_test = degdata_test[degdata_test.notnull]
+degdata_test = degdata[degdata['seqnames'].isin( ['chr1', 'chr22'])]
+#degdata_test = degdata[degdata['seqnames'].isin( ['chr22'])]
+degdata_test = degdata_test[degdata_test[data_cols].notnull().all(1)]
 
-#degdata_train = degdata[~degdata['seqnames'].isin(['chr1', 'chr22'])]
-degdata_train = degdata[degdata['seqnames'].isin( ['chr21'])]
-degdata_train = degdata_train[degdata_train.notnull]
+degdata_train = degdata[~degdata['seqnames'].isin(['chr1', 'chr22'])]
+#degdata_train = degdata[degdata['seqnames'].isin( ['chr21'])]
+degdata_train = degdata_train[degdata_train[data_cols].notnull().all(1)]
 
 
 train_tensor = torch.tensor(degdata_train[data_cols].to_numpy(),
@@ -101,16 +101,16 @@ def mse_fn(lkdeg_true, lkdeg_pred):
 
 
 ### Gut check to see if my model works
-testlin = nn.Linear(in_features = 6, out_features = 20).to(device)
-testlin2 = nn.Linear(in_features = 20, out_features = 20).to(device)
-testlin3 = nn.Linear(in_features = 20, out_features = 1).to(device)
-testrelu = nn.ReLU().to(device)
+# testlin = nn.Linear(in_features = 6, out_features = 20).to(device)
+# testlin2 = nn.Linear(in_features = 20, out_features = 20).to(device)
+# testlin3 = nn.Linear(in_features = 20, out_features = 1).to(device)
+# testrelu = nn.ReLU().to(device)
 
-testlin(train_tensor)
-testrelu(testlin(train_tensor))
-testlin2(testrelu(testlin(train_tensor)))
-testrelu(testlin2(testrelu(testlin(train_tensor))))
-testlin3(testrelu(testlin2(testrelu(testlin(train_tensor)))))
+# testlin(train_tensor)
+# testrelu(testlin(train_tensor))
+# testlin2(testrelu(testlin(train_tensor)))
+# testrelu(testlin2(testrelu(testlin(train_tensor))))
+# testlin3(testrelu(testlin2(testrelu(testlin(train_tensor)))))
 
 ### Train
 
@@ -144,5 +144,5 @@ for epoch in range(epochs):
 
         # Print out what's happening every 10 epochs
         if epoch % 10 == 0:
-            print(f"Epoch: {epoch} | Loss: {loss:.5f}, Accuracy: {mse:.2f}% | Test loss: {test_loss:.5f}, Test acc: {test_mse:.2f}%")
+            print(f"Epoch: {epoch} | Loss: {loss.item():.5f}, Accuracy: {mse.item():.2f}% | Test loss: {test_loss.item():.5f}, Test acc: {test_mse.item():.2f}%")
  
