@@ -113,6 +113,10 @@ def mse_fn(lkdeg_true, lkdeg_pred):
 # testlin3(testrelu(testlin2(testrelu(testlin(train_tensor)))))
 
 ### Train
+train_losses = [1] * epochs
+train_mses = [1] * epochs
+test_losses = [1] * epochs
+test_mses = [1] * epochs
 
 for epoch in range(epochs):
     # 1. Forward pass
@@ -121,6 +125,9 @@ for epoch in range(epochs):
     # Calculate loss and accuracy
     loss = loss_fn(log_kdeg_guess, train_label)
     mse = mse_fn(train_label, log_kdeg_guess)
+
+    train_losses[epoch] = loss.item()
+    train_mses[epoch] = mse.item()
 
     # Optimizer incantation
     optimizer.zero_grad()
@@ -142,7 +149,38 @@ for epoch in range(epochs):
 
         test_mse = mse_fn(test_label, test_lkdegs)
 
+        test_losses[epoch] = test_loss.item()
+        test_mses[epoch] = test_mse.item()
+
         # Print out what's happening every 10 epochs
         if epoch % 10 == 0:
             print(f"Epoch: {epoch} | Loss: {loss.item():.5f}, Accuracy: {mse.item():.2f}% | Test loss: {test_loss.item():.5f}, Test acc: {test_mse.item():.2f}%")
  
+
+
+### Plot losses
+fig, ax = plt.subplots()
+ax.plot(list(range(1, epochs+1)), test_mses)
+fig.show()
+
+fig, ax = plt.subplots()
+ax.plot(list(range(1, epochs+1)), train_mses)
+fig.show()
+
+
+### Make predictions and compare them to the truth
+simple_nn.eval()
+with torch.inference_mode():
+
+    lkdeg_pred = simple_nn(test_tensor)
+
+
+lkdeg_pred_list = lkdeg_pred.squeeze().to('cpu').tolist()
+lkdeg_truth = test_label.squeeze().to('cpu').tolist()
+
+
+plt.scatter(lkdeg_truth, lkdeg_pred_list)
+plt.plot(np.linspace(min(lkdeg_truth), max(lkdeg_truth), 100),
+         np.linspace(min(lkdeg_truth), max(lkdeg_truth), 100),
+         color = 'red', linestyle = '-', linewidth =2)
+plt.show()

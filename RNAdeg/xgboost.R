@@ -66,10 +66,8 @@ bst <- xgboost(
   data = as.matrix(train_list$data),
   label = as.matrix(train_list$label),
   max.depth = 10,
-  eta = 0.3,
-  subsample = 0.5,
   nthread = 8,
-  nrounds = 30,
+  nrounds = 100,
   objective = "reg:squarederror"
 )
 
