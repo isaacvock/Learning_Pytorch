@@ -8,6 +8,127 @@ library(xgboost)
 library(dplyr)
 library(readr)
 library(ggplot2)
+library(MASS)
+
+get_density <- function(x, y, ...) {
+  dens <- MASS::kde2d(x, y, ...)
+  ix <- findInterval(x, dens$x)
+  iy <- findInterval(y, dens$y)
+  ii <- cbind(ix, iy)
+  return(dens$z[ii])
+}
+
+
+# Explore isoform stability trends ---------------------------------------------
+
+### What it look like?
+RNAdeg_data <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/RNAdeg_dataset.csv")
+
+RNAdeg_data %>%
+  mutate(density = get_density(
+    x = log_ksyn,
+    y = log_kdeg,
+    n = 200
+  )) %>%
+  ggplot(aes(x = log_ksyn,
+           y = log_kdeg,
+           color = density)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method='lm', formula= y~x) +
+  scale_color_viridis_c() +
+  xlab("log(ksyn)") +
+  ylab("log(kdeg)")
+
+
+
+RNAdeg_data %>%
+  filter(avg_reads > 50) %>%
+  mutate(density = get_density(
+    x = log_ksyn,
+    y = log_kdeg,
+    n = 200
+  )) %>%
+  ggplot(aes(x = log10(avg_reads),
+             y = log_kdeg,
+             color = density)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method='lm', formula= y~x) +
+  scale_color_viridis_c() +
+  xlab("log10(reads)") +
+  ylab("log(kdeg)")
+
+
+
+
+RNAdeg_data %>%
+  filter(avg_reads > 50) %>%
+  mutate(density = get_density(
+    x = log10(threeprimeUTR_lngth + 1),
+    y = log_kdeg,
+    n = 200
+  )) %>%
+  ggplot(aes(x = log10(threeprimeUTR_lngth + 1),
+             y = log_kdeg,
+             color = density)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method='lm', formula= y~x) +
+  scale_color_viridis_c() +
+  xlab("log10(3' UTR length)") +
+  ylab("log(kdeg)")
+
+
+
+RNAdeg_data %>%
+  filter(avg_reads > 50) %>%
+  mutate(density = get_density(
+    x = log10(fiveprimeUTR_lngth + 1),
+    y = log_kdeg,
+    n = 200
+  )) %>%
+  ggplot(aes(x = log10(fiveprimeUTR_lngth + 1),
+             y = log_kdeg,
+             color = density)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method='lm', formula= y~x) +
+  scale_color_viridis_c() +
+  xlab("log10(5' UTR length)") +
+  ylab("log(kdeg)")
+
+
+
+RNAdeg_data %>%
+  group_by(gene_id) %>%
+  summarise(niso = length(unique(transcript_id))) %>%
+  ggplot(aes(x = factor(niso))) +
+  geom_histogram(stat = "count") +
+  theme_classic() +
+  xlab("Number of isoforms") +
+  ylab("Number of genes")
+
+
+
+RNAdeg_data %>%
+  filter(avg_reads > 50) %>%
+  mutate(density = get_density(
+    x = log10(`3'UTR_length` + 1),
+    y = log_kdeg,
+    n = 200
+  )) %>%
+  ggplot(aes(x = log10(`3'UTR_length` + 1),
+             y = log_kdeg,
+             color = density)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method='lm', formula= y~x) +
+  scale_color_viridis_c() +
+  xlab("log10(3' UTR length)") +
+  ylab("log(kdeg)")
+
+
 
 
 # Fit XGBoost model ------------------------------------------------------------

@@ -53,7 +53,7 @@ cols_to_standardize = ['exonic_length_log',
 data_cols = ['exonic_length_log',
                         'num_exons_log',
                         'fiveprimeUTR_lngth_log',
-                        'threeprimeUTR_lngth_log',
+                        "3'primeUTR_lngth_log",
                         'stop_to_lastEJ_log',
                         'log_ksyn']
 obs_col = ['log_kdeg']
