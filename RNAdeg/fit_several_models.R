@@ -43,7 +43,7 @@ feature_table_processed <- feature_table  %>%
   dplyr::select(seqnames, old_gene_id, transcript_id, NMD_both,
                 log10_3primeUTR, log10_avg_TPM, log10_avg_reads,
                 log_ksyn, log_kdeg, log10_5primeUTR, log10_length,
-                log10_numexons) %>%
+                log10_numexons, avg_lkd_se) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(NMD_both = as.numeric(NMD_both)) %>%
   dplyr::mutate(NMD_both = (NMD_both - mean(NMD_both)) / sd(NMD_both),
