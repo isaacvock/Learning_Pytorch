@@ -346,6 +346,66 @@ ggsave(filename = "XGBoost_feature_importance.png",
 plot(combined_ft$GC_z,
      combined_ft$log_kdeg)
 
+### Some nice figures looking at features more directly
+gGC <- combined_ft %>%
+  mutate(
+    density = get_density(
+      x = GC_cont,
+      y = log_kdeg,
+      n = 200
+    )
+  ) %>%
+  ggplot(
+    aes(x = GC_cont,
+        y = log_kdeg,
+        color = density)
+  ) +
+  geom_point(size = 0.75) +
+  theme_classic() +
+  scale_color_viridis_c() +
+  xlab("logit(GC content)") +
+  ylab("log(kdeg) truth")
+
+glen <- combined_ft %>%
+  mutate(
+    density = get_density(
+      x = log10_length,
+      y = log_kdeg,
+      n = 200
+    )
+  ) %>%
+  ggplot(
+    aes(x = log10_length,
+        y = log_kdeg,
+        color = density)
+  ) +
+  geom_point(size = 0.75) +
+  theme_classic() +
+  scale_color_viridis_c() +
+  xlab("log10(length)") +
+  ylab("log(kdeg) truth")
+
+glen
+
+setwd("C:/Users/isaac/Documents/Simon_Lab/Meetings/Hogg_IWV_2024_10_21/")
+ggsave(filename = "Length_vs_logkdeg.png",
+       plot = glen,
+       width = 4,
+       height = 3)
+ggsave(filename = "GC_content_vs_logkdeg.png",
+       plot = gGC,
+       width = 4,
+       height = 3)
+
+
+cB <- fread("path/to/cB.csv.gz")
+count_df <- cB %>%
+  group_by(sample, XF) %>%
+  summarise(mut_reads = sum(n[TC > 0])) %>%
+  pivot_wider(names_from = sample,
+              values_from = mut_reads)
+
+
 # Explore isoform stability trends ---------------------------------------------
 
 ### What it look like?
