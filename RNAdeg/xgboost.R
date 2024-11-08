@@ -10,6 +10,8 @@ library(readr)
 library(ggplot2)
 library(MASS)
 library(stringr)
+library(gtools)
+library(stringdist)
 
 get_density <- function(x, y, ...) {
   dens <- MASS::kde2d(x, y, ...)
@@ -18,6 +20,748 @@ get_density <- function(x, y, ...) {
   ii <- cbind(ix, iy)
   return(dens$z[ii])
 }
+
+# XGBoost; seq motif exploration; mix trimmed annotation -----------------------
+
+##### SANDBOX #####
+
+bases <- c("A","T","C","G")
+kmers <- permutations(n = length(bases), v = bases, r = 3, repeats.allowed = T)
+
+kmer_df <- tibble(kmer = apply(kmers, 1, paste, collapse = ""))
+
+dist_matrix <- stringdistmatrix(kmer_df$kmer,
+                                kmer_df$kmer,
+                                method = "hamming")
+
+hc <- hclust(as.dist(dist_matrix),
+             method = "median")
+
+clusters <- cutree(hc, k = 4)
+
+kmer_df$cluster <- clusters
+
+tibble::view(kmer_df)
+
+
+##### PROMOTER SEQUENCES #####
+
+### Cluster kmers
+
+## Attempt at kmer clustering
+# bases <- c("A","T","C","G")
+# kmers <- permutations(n = length(bases), v = bases, r = 5, repeats.allowed = T)
+#
+# kmer_df <- tibble(kmer = apply(kmers, 1, paste, collapse = ""))
+#
+# dist_matrix <- stringdistmatrix(kmer_df$kmer,
+#                                 kmer_df$kmer,
+#                                 method = "hamming")
+#
+# hc <- hclust(as.dist(dist_matrix))
+#
+# clusters <- cutree(hc, k = 100)
+#
+# kmer_df$cluster <- clusters
+bases <- c("A","T")
+AREs <- permutations(n = length(bases), v = bases, r = 6, repeats.allowed = T)
+AREs <- apply(AREs, 1, paste, collapse = "")
+
+Pumilios <- c("TGTAAA", "TGTACA",
+              "TGTAGA", "TGTATA")
+
+bases <- c("A","T", "C", "G")
+randoms <- permutations(n = length(bases), v = bases, r = 6, repeats.allowed = T)
+randoms <- apply(randoms, 1, paste, collapse = "")
+randoms <- randoms[
+  !str_count(randoms, "A") > 3 &
+    !str_count(randoms, "G") > 3 &
+    !str_count(randoms, "C") > 3 &
+    !str_count(randoms, "T") > 3
+]
+randoms <- sample(randoms, 15)
+
+## Manual kmer table
+kmer_df <- tibble(
+  kmer = c(AREs,
+           Pumilios,
+           randoms),
+  cluster = rep(1:3, times = c(
+    length(AREs),
+    length(Pumilios),
+    length(randoms)
+  ))
+)
+
+
+### Count kmers in promoter sequence
+promoter_seq <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/promoter_seqs.csv")
+
+promoter_seq
+
+# List of unique clusters
+cluster_IDs <- unique(kmer_df$cluster)
+
+# Initialize a results data frame
+promoter_kmer_cnt <- promoter_seq
+
+# Takes a hot second, but counting occurence of all kmers
+count <- 1
+for (cluster in cluster_IDs) {
+
+  # Get k-mers for the current cluster
+  kmer_list <- kmer_df$kmer[kmer_df$cluster == cluster]
+
+  # Count occurrences of each k-mer in the cluster and sum them
+  promoter_kmer_cnt[[paste0("cluster_", cluster)]] <- sapply(promoter_seq$seq, function(s) {
+    sum(sapply(kmer_list, function(kmer) str_count(s, kmer)))
+  })
+
+
+  print(paste0((count*100) / length(cluster_IDs), "% done"))
+  count <- count + 1
+
+}
+
+# Z-score normalization for each "cluster_" column
+cluster_cols <- grep("^cluster_", names(promoter_kmer_cnt), value = TRUE)
+for (col in cluster_cols) {
+  promoter_kmer_cnt[[col]] <- (promoter_kmer_cnt[[col]] - mean(promoter_kmer_cnt[[col]])) / sd(promoter_kmer_cnt[[col]])
+}
+
+
+
+
+### Load data and fit model
+
+# Load data
+ft <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/RNAdeg_feature_table.csv")
+
+features_to_use <- paste0("cluster_", 1:length(cluster_IDs))
+
+# Filter out low confidence ish
+ft <- ft %>%
+  filter(avg_lkd_se < exp(-2))
+
+### Combine motif and lower-res data
+combined_ft <- ft %>%
+  inner_join(promoter_kmer_cnt,
+             by = "transcript_id")
+
+# Train-test split
+ft_train <- combined_ft %>%
+  filter(!(seqnames %in% c("chr1", "chr22")))
+
+ft_test <- combined_ft %>%
+  filter((seqnames %in% c("chr1", "chr22")))
+
+
+ft_train_hyper <- ft_train %>%
+  filter(seqnames != "chr2")
+ft_test_hyper <- ft_train %>%
+  filter(seqnames == "chr2")
+
+
+train_list <- list(
+  data = ft_train %>% dplyr::select(!!features_to_use),
+  label = ft_train %>% dplyr::select(log_kdeg)
+)
+
+
+test_list <- list(
+  data = ft_test %>% dplyr::select(!!features_to_use),
+  label = ft_test %>% dplyr::select(log_kdeg)
+)
+
+
+train_hyper_list <- list(
+  data = ft_train_hyper %>% dplyr::select(!!features_to_use),
+  label = ft_train_hyper %>% dplyr::select(log_kdeg)
+)
+
+test_hyper_list <- list(
+  data = ft_test_hyper %>% dplyr::select(!!features_to_use),
+  label = ft_test_hyper %>% dplyr::select(log_kdeg)
+)
+
+
+### Find best XGBoost parameters if necessary
+
+depths <- c(3, 5, 7, 10, 15)
+rounds <- c(5, 10, 15, 20, 25)
+etas <- c(0.1, 0.3, 0.5, 0.7, 0.9)
+subsamps <- c(0.3, 0.5, 0.7, 0.9, 1)
+
+nfits <- length(depths) *
+  length(rounds) *
+  length(etas) *
+  length(subsamps)
+
+rmse_df <- tibble()
+count <- 0
+for(d in depths){
+  for(r in rounds){
+    for(e in etas){
+      for(s in subsamps){
+        bst <- xgboost(
+          data = as.matrix(train_hyper_list$data),
+          label = as.matrix(train_hyper_list$label),
+          max.depth = d,
+          nthread = 8,
+          nrounds = r,
+          eta = e,
+          subsample = s,
+          objective = "reg:squarederror",
+          verbose = 0
+        )
+
+        pred <- predict(bst,
+                        as.matrix(test_hyper_list$data))
+
+        rmse <- sqrt(mean((pred - test_hyper_list$label$log_kdeg)^2))
+
+        rmse_df <- rmse_df %>%
+          bind_rows(tibble(
+            depth = d,
+            nrounds = r,
+            eta = e,
+            subsample = s,
+            RMSE = rmse
+          ))
+
+        count <- count + 1
+        print(paste0((count*100) / nfits, "% done"))
+
+      }
+    }
+  }
+}
+
+
+op <- rmse_df %>%
+  filter(RMSE == min(RMSE))
+# With motif data:
+# depth = 7
+# nrounds = 20
+# eta = 0.3
+# subsample = 0.9
+
+# Best parameters from finetuning on testing set:
+# depth = 7
+# rounds = 25
+# eta = 0.1
+# subsample = 0.7
+
+# Best parameters from finetuning on validation set:
+# depth = 7
+# rounds = 25
+# eta = 0.1
+# subsample = 0.7
+
+# Pretty cool that best parameters are stable across
+# valdiation sets
+
+### Fit XGBoost
+bst <- xgboost(
+  data = as.matrix(train_list$data),
+  label = as.matrix(train_list$label),
+  max.depth = op$depth,
+  nthread = 8,
+  nrounds = op$nrounds,
+  subsample = op$subsample,
+  eta = op$eta,
+  objective = "reg:squarederror"
+)
+
+train_pred <- predict(bst,
+                      as.matrix(train_list$data))
+
+
+pred <- predict(bst,
+                as.matrix(test_list$data))
+
+rmse <- sqrt(mean((pred - test_list$label$log_kdeg)^2))
+
+print(paste("Test RMSE = ", rmse))
+# 0.733
+
+cor(pred, test_list$label$log_kdeg)
+# 0.674
+
+
+pred_df <- tibble(
+  prediction = pred,
+  truth = test_list$label$log_kdeg
+)
+
+pred_df_train <- tibble(
+  prediction = train_pred,
+  truth = train_list$label$log_kdeg
+)
+
+
+gtest <- pred_df %>%
+  mutate(
+    density = get_density(
+      x = truth,
+      y = prediction,
+      n = 200
+    )
+  ) %>%
+  ggplot(
+    aes(x = truth,
+        y = prediction,
+        color = density)
+  ) +
+  geom_point() +
+  theme_classic() +
+  scale_color_viridis_c() +
+  xlab("log(kdeg) truth") +
+  ylab("log(kdeg) prediction") +
+  geom_abline(slope = 1,
+              intercept = 0,
+              color = 'darkred',
+              linetype = 'dotted',
+              linewidth = 0.75)
+
+
+gtrain <- pred_df_train %>%
+  mutate(
+    density = get_density(
+      x = truth,
+      y = prediction,
+      n = 200
+    )
+  ) %>%
+  ggplot(
+    aes(x = truth,
+        y = prediction,
+        color = density)
+  ) +
+  geom_point(size = 0.75) +
+  theme_classic() +
+  scale_color_viridis_c() +
+  xlab("log(kdeg) truth") +
+  ylab("log(kdeg) prediction") +
+  geom_abline(slope = 1,
+              intercept = 0,
+              color = 'darkred',
+              linetype = 'dotted',
+              linewidth = 0.75)
+
+
+
+importance_matrix <- xgb.importance(model = bst)
+
+ggain <- importance_matrix %>%
+  as_tibble() %>%
+  mutate(Feature = factor(Feature,
+                          levels = Feature[order(-Gain)])) %>%
+  ggplot(aes(x = Feature,
+             y = Gain)) +
+  geom_bar(stat = "identity") +
+  theme_classic() +
+  xlab("Feature") +
+  ylab("Gain") +
+  theme(axis.text.x = element_blank())
+
+
+ggain
+
+gtrain
+
+gtest
+
+setwd("C:/Users/isaac/Documents/Simon_Lab/Meetings/DC_IWV_2024_11_05/")
+ggsave(filename = "Promoter_manual_kmer_model_Gain.png",
+       plot = ggain,
+       width = 5,
+       height = 3.5)
+ggsave(filename = "Promoter_manual_kmer_model_Train_Acc.png",
+       plot = gtrain,
+       width = 5,
+       height = 3.5)
+ggsave(filename = "Promoter_manual_kmer_model_Test_Acc.png",
+       plot = gtest,
+       width = 5,
+       height = 3.5)
+
+
+##### 3'UTR SEQUENCE #####
+
+### Manual-ish kmer table
+
+bases <- c("A","T")
+AREs <- permutations(n = length(bases), v = bases, r = 6, repeats.allowed = T)
+AREs <- apply(AREs, 1, paste, collapse = "")
+
+Pumilios <- c("TGTAAA", "TGTACA",
+              "TGTAGA", "TGTATA")
+
+bases <- c("A","T", "C", "G")
+randoms <- permutations(n = length(bases), v = bases, r = 6, repeats.allowed = T)
+randoms <- apply(randoms, 1, paste, collapse = "")
+randoms <- randoms[
+  !str_count(randoms, "A") > 3 &
+    !str_count(randoms, "G") > 3 &
+    !str_count(randoms, "C") > 3 &
+    !str_count(randoms, "T") > 3
+]
+randoms <- sample(randoms, 15)
+
+kmer_df <- tibble(
+  kmer = c(AREs,
+           Pumilios,
+           randoms),
+  cluster = rep(1:3, times = c(
+    length(AREs),
+    length(Pumilios),
+    length(randoms)
+  ))
+)
+
+
+### Count kmers in promoter sequence
+threeputr_seq <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/threeprimeUTR_seqs.csv")
+
+# List of unique clusters
+cluster_IDs <- unique(kmer_df$cluster)
+
+# Initialize a results data frame
+threeputr_kmer_cnt <- threeputr_seq
+
+# Takes a hot second, but counting occurence of all kmers
+count <- 1
+for (cluster in cluster_IDs) {
+
+  # Get k-mers for the current cluster
+  kmer_list <- kmer_df$kmer[kmer_df$cluster == cluster]
+
+  # Count occurrences of each k-mer in the cluster and sum them
+  threeputr_kmer_cnt[[paste0("cluster_", cluster)]] <- sapply(threeputr_seq$seq, function(s) {
+    sum(sapply(kmer_list, function(kmer) str_count(s, kmer)))
+  })
+
+
+  print(paste0((count*100) / length(cluster_IDs), "% done"))
+  count <- count + 1
+
+}
+
+# Z-score normalization for each "cluster_" column
+threeputr_kmer_cnt <- threeputr_kmer_cnt
+cluster_cols <- grep("^cluster_", names(threeputr_kmer_cnt), value = TRUE)
+for (col in cluster_cols) {
+  threeputr_kmer_cnt[[col]] <- (threeputr_kmer_cnt[[col]] - mean(threeputr_kmer_cnt[[col]])) / sd(threeputr_kmer_cnt[[col]])
+}
+
+
+### Load data and fit model
+
+# Load data
+ft <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/RNAdeg_feature_table.csv")
+
+features_to_use <- paste0("cluster_", 1:length(cluster_IDs))
+
+# Filter out low confidence ish
+ft <- ft %>%
+  filter(avg_lkd_se < exp(-2))
+
+### Combine motif and lower-res data
+combined_ft <- ft %>%
+  inner_join(threeputr_kmer_cnt,
+             by = "transcript_id")
+
+# Train-test split
+ft_train <- combined_ft %>%
+  filter(!(seqnames %in% c("chr1", "chr22")))
+
+ft_test <- combined_ft %>%
+  filter((seqnames %in% c("chr1", "chr22")))
+
+
+ft_train_hyper <- ft_train %>%
+  filter(seqnames != "chr2")
+ft_test_hyper <- ft_train %>%
+  filter(seqnames == "chr2")
+
+
+train_list <- list(
+  data = ft_train %>% dplyr::select(!!features_to_use),
+  label = ft_train %>% dplyr::select(log_kdeg)
+)
+
+
+test_list <- list(
+  data = ft_test %>% dplyr::select(!!features_to_use),
+  label = ft_test %>% dplyr::select(log_kdeg)
+)
+
+
+train_hyper_list <- list(
+  data = ft_train_hyper %>% dplyr::select(!!features_to_use),
+  label = ft_train_hyper %>% dplyr::select(log_kdeg)
+)
+
+test_hyper_list <- list(
+  data = ft_test_hyper %>% dplyr::select(!!features_to_use),
+  label = ft_test_hyper %>% dplyr::select(log_kdeg)
+)
+
+
+### Find best XGBoost parameters if necessary
+
+depths <- c(3, 5, 7, 10, 15)
+rounds <- c(5, 10, 15, 20, 25)
+etas <- c(0.1, 0.3, 0.5, 0.7, 0.9)
+subsamps <- c(0.3, 0.5, 0.7, 0.9, 1)
+
+nfits <- length(depths) *
+  length(rounds) *
+  length(etas) *
+  length(subsamps)
+
+rmse_df <- tibble()
+count <- 0
+for(d in depths){
+  for(r in rounds){
+    for(e in etas){
+      for(s in subsamps){
+        bst <- xgboost(
+          data = as.matrix(train_hyper_list$data),
+          label = as.matrix(train_hyper_list$label),
+          max.depth = d,
+          nthread = 8,
+          nrounds = r,
+          eta = e,
+          subsample = s,
+          objective = "reg:squarederror",
+          verbose = 0
+        )
+
+        pred <- predict(bst,
+                        as.matrix(test_hyper_list$data))
+
+        rmse <- sqrt(mean((pred - test_hyper_list$label$log_kdeg)^2))
+
+        rmse_df <- rmse_df %>%
+          bind_rows(tibble(
+            depth = d,
+            nrounds = r,
+            eta = e,
+            subsample = s,
+            RMSE = rmse
+          ))
+
+        count <- count + 1
+        print(paste0((count*100) / nfits, "% done"))
+
+      }
+    }
+  }
+}
+
+
+op <- rmse_df %>%
+  filter(RMSE == min(RMSE))
+# With motif data:
+# depth = 7
+# nrounds = 20
+# eta = 0.3
+# subsample = 0.9
+
+# Best parameters from finetuning on testing set:
+# depth = 7
+# rounds = 25
+# eta = 0.1
+# subsample = 0.7
+
+# Best parameters from finetuning on validation set:
+# depth = 7
+# rounds = 25
+# eta = 0.1
+# subsample = 0.7
+
+# Pretty cool that best parameters are stable across
+# valdiation sets
+
+### Fit XGBoost
+bst <- xgboost(
+  data = as.matrix(train_list$data),
+  label = as.matrix(train_list$label),
+  max.depth = op$depth,
+  nthread = 8,
+  nrounds = op$nrounds,
+  subsample = op$subsample,
+  eta = op$eta,
+  objective = "reg:squarederror"
+)
+
+train_pred <- predict(bst,
+                      as.matrix(train_list$data))
+
+
+pred <- predict(bst,
+                as.matrix(test_list$data))
+
+rmse <- sqrt(mean((pred - test_list$label$log_kdeg)^2))
+
+print(paste("Test RMSE = ", rmse))
+# 0.733
+
+cor(pred, test_list$label$log_kdeg)
+# 0.674
+
+
+pred_df <- tibble(
+  prediction = pred,
+  truth = test_list$label$log_kdeg
+)
+
+pred_df_train <- tibble(
+  prediction = train_pred,
+  truth = train_list$label$log_kdeg
+)
+
+
+gtest <- pred_df %>%
+  mutate(
+    density = get_density(
+      x = truth,
+      y = prediction,
+      n = 200
+    )
+  ) %>%
+  ggplot(
+    aes(x = truth,
+        y = prediction,
+        color = density)
+  ) +
+  geom_point() +
+  theme_classic() +
+  scale_color_viridis_c() +
+  xlab("log(kdeg) truth") +
+  ylab("log(kdeg) prediction") +
+  geom_abline(slope = 1,
+              intercept = 0,
+              color = 'darkred',
+              linetype = 'dotted',
+              linewidth = 0.75)
+
+
+gtrain <- pred_df_train %>%
+  mutate(
+    density = get_density(
+      x = truth,
+      y = prediction,
+      n = 200
+    )
+  ) %>%
+  ggplot(
+    aes(x = truth,
+        y = prediction,
+        color = density)
+  ) +
+  geom_point(size = 0.75) +
+  theme_classic() +
+  scale_color_viridis_c() +
+  xlab("log(kdeg) truth") +
+  ylab("log(kdeg) prediction") +
+  geom_abline(slope = 1,
+              intercept = 0,
+              color = 'darkred',
+              linetype = 'dotted',
+              linewidth = 0.75)
+
+
+importance_matrix <- xgb.importance(model = bst)
+  # Clusters 45 and 9 are most impactful
+
+ggain <- importance_matrix %>%
+  as_tibble() %>%
+  mutate(Feature = factor(Feature,
+                          levels = Feature[order(-Gain)])) %>%
+  ggplot(aes(x = Feature,
+             y = Gain)) +
+  geom_bar(stat = "identity") +
+  theme_classic() +
+  xlab("Feature") +
+  ylab("Gain") +
+  theme(axis.text.x = element_blank())
+
+
+setwd("C:/Users/isaac/Documents/Simon_Lab/Meetings/DC_IWV_2024_11_05/")
+ggsave(filename = "ThreeprimeUTR_manual_kmer_model_Gain.png",
+       plot = ggain,
+       width = 5,
+       height = 3.5)
+ggsave(filename = "ThreeprimeUTR_manual_kmer_model_Train_Acc.png",
+       plot = gtrain,
+       width = 5,
+       height = 3.5)
+ggsave(filename = "ThreeprimeUTR_manual_kmer_model_Test_Acc.png",
+       plot = gtest,
+       width = 5,
+       height = 3.5)
+
+ggain
+
+gtrain
+
+gtest
+
+
+### Directly correlate kmer counts with kdeg
+combined_ft %>%
+  mutate(
+    density = get_density(
+      x = cluster_45,
+      y = log_kdeg,
+      n = 200
+    )
+  ) %>%
+  ggplot(aes(x = cluster_45,
+             y = log_kdeg,
+             color = density)) +
+  geom_point() +
+  theme_classic() +
+  xlab("Cluster 45 kmer count") +
+  ylab("log(kdeg)")
+
+
+combined_ft %>%
+  mutate(
+    density = get_density(
+      x = cluster_9,
+      y = log_kdeg,
+      n = 200
+    )
+  ) %>%
+  ggplot(aes(x = cluster_9,
+             y = log_kdeg,
+             color = density)) +
+  geom_point() +
+  theme_classic() +
+  xlab("Cluster 9 kmer count") +
+  ylab("log(kdeg)")
+
+
+combined_ft %>%
+  mutate(
+    density = get_density(
+      x = cluster_1,
+      y = log_kdeg,
+      n = 200
+    )
+  ) %>%
+  ggplot(aes(x = cluster_1,
+             y = log_kdeg,
+             color = density)) +
+  geom_point() +
+  theme_classic() +
+  xlab("Cluster 1 kmer count") +
+  ylab("log(kdeg)")
+
 
 
 # XGBoost model with sequence motifs included ----------------------------------
