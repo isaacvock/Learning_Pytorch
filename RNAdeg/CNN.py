@@ -136,6 +136,7 @@ optimizer = torch.optim.SGD(
 
 epochs = 10
 
+train_losses = [0]*10
 for epoch in range(epochs):
 
     train_loss = 0
@@ -153,6 +154,7 @@ for epoch in range(epochs):
         optimizer.step()
 
     train_loss /= len(train_loader)
+    train_losses[epoch] = train_loss.to('cpu').detach().numpy()
 
     ### Testing
     # Setup variables for accumulatively adding up loss and accuracy 
@@ -194,4 +196,9 @@ plt.scatter(true_kdeg,
             alpha = 0.5)
 plt.xlabel('True values')
 plt.ylabel('Predicted values')
+plt.show()
+
+
+plt.scatter(list(range(epochs)),
+            train_losses)
 plt.show()
