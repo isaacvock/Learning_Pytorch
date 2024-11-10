@@ -15,6 +15,8 @@ library(EZbakR)
 
 library(BSgenome.Hsapiens.UCSC.hg38)
 library(stringr)
+library(coRdon)
+library(tidyr)
 
 source("C:/Users/isaac/Documents/ML_pytorch/Scripts/RNAdeg/processing_functions.R")
 
@@ -46,6 +48,204 @@ clean_table <- clean_feature_table(RNAdeg_data,
 seqs <- get_sequencing_info(mix_gtf, outdir = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/")
 
 threepcheck <- seqs$ThreePrimeUTR
+
+
+# Codon optimality explortation ------------------------------------------------
+### Analysis process
+## Going to look at the codon distribution among stable and unstable transcripts
+## Ranking of codon optimality from previous study
+## 1) GCT (A)
+## 2) GGT (G)
+## 3) GTC (V)
+## 4) TTG (L)
+## 5) GTT (V)
+## 6) GCC (A)
+## 7) CCA (P)
+## 8) ACT (T)
+## 9) TCT (S)
+## 10) TCC (S)
+## 11) ACC (T)
+## 12) ATC (I)
+## 13) AAG (K)
+## 14) TAC (Y)
+## 15) TTC (F)
+## 16) GAA (E)
+## 17) CGT (R)
+## 18) CAA (Q)
+## 19) CAC (H)
+## 20) AAC (N)
+## 21) GAC (D)
+## 22) ATT (I)
+## 23) AGA (R)
+## 24) CCT (P)
+## 25) GGC (G)
+## 26) TGG (W)
+## 27) TGT (C)
+## 28) TTA (L) Start "Non-optimal codons"
+## 29) GAT (D)
+## 30) ATG (M)
+## 31) TTT (F)
+## 32) TGC (C)
+## 33) CAT (H)
+## 34) GCA (A)
+## 35) TAT (Y)
+## 36) CCC (P)
+## 37) GGG (G)
+## 38) GTG (V)
+## 39) GCG (A)
+## 40) CGC (R)
+## 41) TCA (S)
+## 42) GAG (E)
+## 43) GGA (G)
+## 44) TCG (S)
+## 45) CGG (R)
+## 46) AAT (N)
+## 47) CTT (L)
+## 48) CTA (L)
+## 49) CAG (Q)
+## 50) CTC (L)
+## 51) ACA (T)
+## 52) AGC (S)
+## 53) AAA (K)
+## 54) AGT (S)
+## 55) ACG (T)
+## 56) CTG (L)
+## 57) CCG (P)
+## 58) GTA (V)
+## 59) AGG (R)
+## 60) CGA (R)
+## 61) ATA (I)
+
+
+codon_dict <- fread(
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/nuclear_codon_statistics.tsv"
+) %>%
+  as_tibble()
+
+
+abundances <- ezbdo$readcounts$isoform_quant_rsem %>%
+  dplyr::group_by(transcript_id) %>%
+  dplyr::summarise(
+    TPM_avg = mean(TPM[grepl("DMSO", sample)])
+  )
+
+CDS <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/CDS_seqs.csv") %>%
+  dplyr::rename(CDS = seq)
+threepUTR <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/threeprimeUTR_seqs.csv") %>%
+  dplyr::rename(threepUTR = seq)
+
+abundance_with_seq <- abundances %>%
+  dplyr::inner_join(CDS,
+                    by = "transcript_id") %>%
+  dplyr::inner_join(threepUTR,
+                    by = "transcript_id") %>%
+  dplyr::rowwise() %>%
+  mutate(
+    seq = paste0(CDS, str_sub(threepUTR, 1, 3))
+  ) %>%
+  filter(str_length(seq) > 25)
+
+abundant_CDS <- abundance_with_seq %>%
+  ungroup() %>%
+  dplyr::mutate(
+    TPM_rank = ntile(TPM_avg,
+                     10)
+  ) %>%
+  filter(TPM_rank > 8)
+
+CDS_seqs <- DNAStringSet(
+  x = abundant_CDS$seq
+)
+
+CDS_codons <- codonTable(CDS_seqs)
+
+CDS_codon_counts <- CDS_codons@counts %>% as_tibble()
+CDS_codon_counts$length <- CDS_codons@len
+CDS_codon_counts$transcript_id <- abundant_CDS$transcript_id
+
+CDS_codon_tidy <- CDS_codon_counts %>%
+  pivot_longer(
+    cols = !c(length,transcript_id),
+    values_to = "count",
+    names_to = "CODON"
+  ) %>%
+  dplyr::inner_join(
+    codon_dict %>%
+      dplyr::select(CODON, `Amino acid`, RSCU),
+    by = "CODON"
+  )
+
+codon_optimality <- CDS_codon_tidy %>%
+  group_by(CODON, `Amino acid`) %>%
+  summarise(
+    RSCU = mean(RSCU),
+    count = sum(count)
+  ) %>%
+  group_by(`Amino acid`) %>%
+  mutate(
+    RSCU_hogg = count / mean(count)
+  ) %>%
+  mutate(weight = RSCU / max(RSCU),
+         weight_hogg = RSCU_hogg / max(RSCU_hogg))
+
+
+# Exclude start and stop
+all_CDS_seqs <- DNAStringSet(
+  x = str_sub(abundance_with_seq$seq, start = 4, end = str_length(abundance_with_seq$seq) - 3)
+)
+
+
+all_CDS_codons <- codonTable(all_CDS_seqs)
+
+all_CDS_codon_counts <- all_CDS_codons@counts %>% as_tibble()
+all_CDS_codon_counts$length <- all_CDS_codons@len
+all_CDS_codon_counts$transcript_id <- abundance_with_seq$transcript_id
+
+all_CDS_codon_tidy <- all_CDS_codon_counts %>%
+  pivot_longer(
+    cols = !c(length,transcript_id),
+    values_to = "count",
+    names_to = "CODON"
+  ) %>%
+  dplyr::inner_join(
+    codon_optimality %>%
+      dplyr::select(-count),
+    by = "CODON"
+  )
+
+all_CDS_CAI <- all_CDS_codon_tidy %>%
+  dplyr::group_by(transcript_id) %>%
+  dplyr::summarise(
+    log_CAI = (1 / sum(count))*sum(log(weight_hogg)*count)
+  )
+
+setwd("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/")
+write_csv(all_CDS_CAI,
+          "CAI_codon_scores.csv")
+
+# Sandbox geneal deg features --------------------------------------------------
+
+mix_gtf <- rtracklayer::import("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/factR2/mix_trimmed/mix_trimmed_factR2.gtf")
+transcript_file <- "C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/factR2/mix_trimmed/mix_trimmed_factR2_transcript.tsv"
+ezbdo <- readRDS("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/EZbakRFits/Mix_trimmed_EZbakRFit_withgenewide.rds")
+
+##### Codon optimality calculation #####
+
+
+##### Process m6A site data #####
+
+
+##### Process AU-rich 3'UTR element data #####
+
+
+##### Process miRNA data #####
+
+
+##### Calculate Kozak scores #####
+
+
+#####
+
 
 
 # Sandbox ----------------------------------------------------------------------
