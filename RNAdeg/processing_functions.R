@@ -83,6 +83,7 @@ assemble_data <- function(gtf, factr_transcript_file,
 
 
   ##### Combine everything
+
   combined_table <- dplyr::inner_join(
     exonic_features,
     UTR_features,
@@ -91,7 +92,7 @@ assemble_data <- function(gtf, factr_transcript_file,
     dplyr::inner_join(
       NMD_status,
       by = c("transcript_id", "gene_id",
-             "gene_name")
+             "gene_name", "strand")
     )
 
 

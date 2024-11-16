@@ -17,37 +17,390 @@ library(BSgenome.Hsapiens.UCSC.hg38)
 library(stringr)
 library(coRdon)
 library(tidyr)
+library(readxl)
 
 source("C:/Users/isaac/Documents/ML_pytorch/Scripts/RNAdeg/processing_functions.R")
 
-# Trimmed mix annotation from the gamut ----------------------------------------
 
-### Curate input
-mix_gtf <- rtracklayer::import("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/factR2/mix_trimmed/mix_trimmed_factR2.gtf")
+# Process SQUANTI augmented RNAdeg data ----------------------------------------
+
+RNAdeg_data <- read_csv(
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_all_features.csv"
+) %>%
+  dplyr::rename(
+    gene_id = gene_id.x,
+    gene_name = gene_name.x,
+    strand = strand.x,
+    threepUTR_length = `3'UTR_length`
+  ) %>%
+  dplyr::select(
+    chrom,
+    gene_id,
+    transcript_id,
+    MSTRG_gene_id,
+    strand,
+    is_NMD,
+    predicted_NMD,
+    num_of_downEJs,
+    stop_to_lastEJ,
+    threepUTR_length,
+    difference,
+    uncertainty,
+    padj,
+    log_kdeg_DMSO,
+    avg_lkd_se_DMSO,
+    log_kdeg_SMG1i,
+    avg_lkd_se_SMG1i,
+    log_ksyn_DMSO,
+    log_ksyn_SMG1i,
+    avg_TPM_DMSO,
+    avg_TPM_SMG1i,
+    log_CAI,
+    avg_CSC,
+    avg_AASC,
+    threeputr_miRNAseed_count,
+    fiveputr_miRNAseed_count,
+    CDS_miRNAseed_count,
+    threeputr_DRACH_count,
+    fiveputr_DRACH_count,
+    CDS_DRACH_count,
+    m6A_site_cnt_Schwartz2014,
+    first_exon_length,
+    longest_internal_exon_length,
+    last_exon_length,
+    gene_length,
+    mean_intron_length,
+    longest_intron_length,
+    total_exons,
+    cds_length,
+    distance_to_last_junction,
+    distance_to_nearest_downstream_junction,
+    distance_5prime_to_stop,
+    stop_codon_exon_size,
+    stop_codon_exon_number,
+    structural_category,
+    promoter_seq,
+    threeputr_seq,
+    fiveputr_seq,
+    CDS_seq,
+    ORF_seq
+  ) %>%
+  dplyr::mutate(
+    minus1_AA = str_sub(ORF_seq,
+                        start = str_length(ORF_seq),
+                        end = str_length(ORF_seq)),
+    minus2_AA = str_sub(ORF_seq,
+                        start = str_length(ORF_seq)-1,
+                        end = str_length(ORF_seq)-1),
+    termination_codon = str_sub(CDS_seq,
+                                start = str_length(CDS_seq)-2,
+                                end = str_length(CDS_seq)),
+    TC_tetranucleotide = paste0(str_sub(CDS_seq,
+                                 start = str_length(CDS_seq)-2,
+                                 end = str_length(CDS_seq)),
+                                str_sub(threeputr_seq,
+                                        start = 1,
+                                        end = 1)),
+    GCcontent_downstream_TC = str_count(
+      str_sub(threeputr_seq, start = 2,
+              end = pmin(str_length(threeputr_seq),
+                         202)),
+              "[GC]") / pmin(str_length(threeputr_seq),
+                             202)
+  ) %>%
+  dplyr::group_by(
+    chrom,
+    gene_id,
+    transcript_id,
+    MSTRG_gene_id,
+    strand
+  ) %>%
+  dplyr::mutate(
+    nonPTC_log_kdeg_DMSO = mean(log_kdeg_DMSO[!is_NMD & avg_TPM_DMSO == max(avg_TPM_DMSO[!is_NMD])]),
+    nonPTC_log_kdeg_SMG1i = mean(log_kdeg_SMG1i[!is_NMD & avg_TPM_SMG1i == max(avg_TPM_SMG1i[!is_NMD])])
+  )
+
+write_csv(RNAdeg_data,
+          "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_model_features.csv"
+          )
+
+
+# Trimmed mix SQUANTI starting point -------------------------------------------
+
+SQUANTI_info <- fread("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/DataTables/Mix_trimmed_GMST_isoforms_EZbakR_factR2_SQANTI_merged.tsv") %>%
+  as_tibble()
+
 isoforms_to_keep <- read_csv(
   "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/isoforms_to_keep.csv"
 )
 
-# Filter rsome stuff
+mix_gtf_nofactr <- rtracklayer::import("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/mix_trimmed.gtf")
+mix_gtf <- rtracklayer::import("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/factR2/mix_trimmed/mix_trimmed_factR2.gtf")
 mcols(mix_gtf)$ID <- NULL
 mix_gtf <- mix_gtf[!grepl("_", seqnames(mix_gtf))]
 
-transcript_file <- "C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/factR2/mix_trimmed/mix_trimmed_factR2_transcript.tsv"
+
 ezbdo <- readRDS("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/EZbakRFits/Mix_trimmed_EZbakRFit_withgenewide.rds")
 
-RNAdeg_data <-  assemble_data(
-  gtf = mix_gtf, factr_transcript_file = transcript_file,
-  isoform_filter = isoforms_to_keep,
-  ezbdo = ezbdo,
-  outdir = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered"
+
+##### Add EZbakR information #####
+
+# Stability information already in there, but just want to
+# double check that it is right estimates
+isoforms_ez <- EZget(ezbdo,
+                  type = "kinetics",
+                  features = "transcript_id",
+                  exactMatch = FALSE) %>%
+  dplyr::inner_join(
+    ezbdo$readcounts$isoform_quant_rsem,
+    by = c("transcript_id", "sample")
+  ) %>%
+  dplyr::group_by(
+    XF, transcript_id
+  ) %>%
+  dplyr::summarise(
+    log_kdeg_DMSO = mean(log_kdeg[base::grepl("DMSO", sample)]),
+    log_kdeg_SMG1i = mean(log_kdeg[base::grepl("11j", sample)]),
+    avg_lkd_se_DMSO = mean(se_log_kdeg[base::grepl("DMSO", sample)]),
+    avg_lkd_se_SMG1i = mean(se_log_kdeg[base::grepl("11j", sample)]),
+    log_ksyn_DMSO = mean(log(exp(log_kdeg[base::grepl("DMSO", sample)])*TPM[base::grepl("DMSO", sample)])),
+    log_ksyn_SMG1i = mean(log(exp(log_kdeg[base::grepl("11j", sample)])*TPM[base::grepl("11j", sample)])),
+    avg_reads_DMSO = mean(n[base::grepl("DMSO", sample)]),
+    avg_reads_SMG1i = mean(n[base::grepl("11j", sample)]),
+    avg_TPM_DMSO = mean(TPM[base::grepl("DMSO", sample)]),
+    avg_TPM_SMG1i = mean(TPM[base::grepl("11j", sample)]),
+    effective_length = mean(effective_length)
+  ) %>%
+  dplyr::filter((avg_reads_DMSO > 25 &
+                  avg_TPM_DMSO > 2) |
+                  (avg_reads_SMG1i > 25 &
+                     avg_TPM_SMG1i > 2)) %>%
+  dplyr::rename(
+    old_gene_id = XF
+  )
+
+
+RNAdeg_data <- SQUANTI_info %>%
+  dplyr::inner_join(
+    isoforms_ez,
+    by = c("transcript_id")
+  )
+
+
+# Filter out questionable shit
+RNAdeg_data_filter <- RNAdeg_data %>%
+  inner_join(
+    isoforms_to_keep,
+    by = "transcript_id"
+  ) %>%
+  dplyr::filter(
+    !problematic & !(structural_category %in% c("antisense", "genic_intron", "intergenic") )
+  )
+
+write_csv(RNAdeg_data_filter,
+          file = "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_filter.csv")
+
+
+##### Impute new CDSs into GTF, then get sequences #####
+
+seqname_dict <- as_tibble(mix_gtf) %>%
+  dplyr::filter(type == "transcript") %>%
+  dplyr::select(transcript_id, seqnames) %>%
+  dplyr::distinct()
+
+RNAdeg_data_CDS <- RNAdeg_data_filter %>%
+  inner_join(seqname_dict,
+             by = "transcript_id") %>%
+  dplyr::filter(
+    !is.na(CDS_genomic_start) &
+      !is.na(CDS_genomic_end)
+  ) %>%
+  dplyr::mutate(CDS_genomic_start_corrected = case_when(
+    strand == "-" ~ CDS_genomic_end,
+    .default = CDS_genomic_start
+  ),
+  CDS_genomic_end_corrected = case_when(
+    strand == "-" ~ CDS_genomic_start,
+    .default = CDS_genomic_end
+  )
+  )
+
+cds <- GenomicRanges::GRanges(
+  seqnames = RNAdeg_data_CDS$seqnames,
+  ranges = IRanges(
+    start = RNAdeg_data_CDS$CDS_genomic_start_corrected,
+    end = RNAdeg_data_CDS$CDS_genomic_end_corrected
+  ),
+  strand = RNAdeg_data_CDS$strand,
+  transcript_id = RNAdeg_data_CDS$transcript_id,
+  gene_id = RNAdeg_data_CDS$gene_id,
+  gene_name = RNAdeg_data_CDS$gene_name,
+  type = "CDS"
 )
 
-clean_table <- clean_feature_table(RNAdeg_data,
-                                   output = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/RNAdeg_feature_table.csv")
+# cds_exon <- GenomicRanges::intersect(mix_gtf[mix_gtf$type == "exon"],
+#           cds)
 
-seqs <- get_sequencing_info(mix_gtf, outdir = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/")
 
-threepcheck <- seqs$ThreePrimeUTR
+# as_tibble(mix_gtf) %>%
+#   dplyr::filter(type == "gene"
+#                 & gene_id == "ENSG00000000457.14")
+
+exons <- mix_gtf[mix_gtf$type == "exon"]
+exons$gt_id <- paste0(exons$gene_id, "_", exons$transcript_id)
+
+gt_ids <- paste0(cds$gene_id, "_", cds$transcript_id)
+cds$gt_id <- gt_ids
+
+cds_exon_list <- vector(
+  mode = "list",
+  length = length(gt_ids)
+)
+
+# This is annoyingly slow, like 10-20 minutes to run. I can do intersection on full GRange objects,
+# but then I lose CDS metadata with no way to easily retrieve it.
+count <- 1
+for(g in gt_ids){
+
+  cds_t <- cds[cds$gt_id == g]
+  exons_t <- exons[exons$gt_id == g]
+
+  cds_exon_t <- GenomicRanges::intersect(
+    cds_t,
+    exons_t
+  )
+
+  mcols(cds_exon_t) <- mcols(cds_t)
+  cds_exon_t$type <- "CDS"
+
+  cds_exon_list[[count]] <- cds_exon_t
+  count <- count + 1
+
+  if((count %% 100) == 0){
+    print(paste0((count / length(gt_ids))* 100, "% complete"))
+  }
+
+}
+
+cds_exon <- do.call(
+  c,
+  cds_exon_list
+)
+
+cds_exon$gt_id <- NULL
+
+
+# Strip mcols down to basic information
+mix_gtf_simple <- mix_gtf[!(mix_gtf$type %in% c("CDS"))]
+mcols(mix_gtf_simple) <- mcols(mix_gtf_simple) %>%
+  as_tibble() %>%
+  dplyr::select(
+    transcript_id,
+    gene_id,
+    gene_name,
+    type
+  )
+
+mix_gtf_cds <- c(
+  mix_gtf_simple,
+  cds_exon
+)
+
+mix_gtf_cds
+
+rtracklayer::export(
+  mix_gtf_cds,
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/Annotation_gamut_analyses/Annotations/mix_trimmed_squantiCDS.gtf"
+)
+
+mix_gtf_cds
+
+
+txdb <- GenomicFeatures::makeTxDbFromGRanges(mix_gtf_cds)
+outdir <- "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/"
+
+
+### Promoter sequences
+
+promoter_seqs <- getSeq(Hsapiens, promoters(txdb))
+
+seq_as_str <- as.character(promoter_seqs)
+
+promoter_df <- tibble(
+  seq = seq_as_str,
+  transcript_id = names(seq_as_str)
+)
+
+write_csv(promoter_df,
+          file = paste0(outdir, "/promoter_seqs.csv"))
+
+
+### 3'UTR sequences
+
+threeprimeutr <- threeUTRsByTranscript(txdb,
+                                       use.names = TRUE)
+
+threeprimeutr_seq <- getSeq(Hsapiens,
+                            unlist(threeprimeutr))
+
+threeprimeutr_str <- as.character(threeprimeutr_seq)
+
+threeprimeutr_df <- tibble(
+  seq = threeprimeutr_str,
+  transcript_id = names(threeprimeutr_str)
+) %>%
+  group_by(transcript_id) %>%
+  summarise(seq = paste(seq, collapse = ""))
+
+
+write_csv(threeprimeutr_df,
+          file = paste0(outdir, "/threeprimeUTR_seqs.csv"))
+
+
+
+### 5'UTR sequences
+
+fiveprimeutr <- fiveUTRsByTranscript(txdb,
+                                     use.names = TRUE)
+
+fiveprimeutr_seq <- getSeq(Hsapiens,
+                           fiveprimeutr) %>%
+  unlist()
+
+fiveprimeutr_str <- as.character(fiveprimeutr_seq)
+
+fiveprimeutr_df <- tibble(
+  seq = fiveprimeutr_str,
+  transcript_id = names(fiveprimeutr_str)
+) %>%
+  group_by(transcript_id) %>%
+  summarise(seq = paste(seq, collapse = ""))
+
+write_csv(fiveprimeutr_df,
+          file = paste0(outdir, "/fiveprimeUTR_seqs.csv"))
+
+
+### Get CDS sequence
+
+cds <- cdsBy(txdb, by = "tx",
+             use.names = TRUE)
+
+cds_seq <- getSeq(Hsapiens,
+                  cds) %>%
+  unlist()
+
+cds_str <- as.character(cds_seq)
+
+cds_df <- tibble(
+  seq = cds_str,
+  transcript_id = names(cds_str)
+) %>%
+  group_by(transcript_id) %>%
+  summarise(seq = paste(seq, collapse = ""))
+
+
+write_csv(cds_df,
+          file = paste0(outdir, "/CDS_seqs.csv"))
 
 
 # Codon optimality explortation ------------------------------------------------
@@ -117,10 +470,59 @@ threepcheck <- seqs$ThreePrimeUTR
 ## 61) ATA (I)
 
 
+### Starting table
+RNAdeg_data <- read_csv("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_filter.csv")
+ezbdo <- readRDS("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/EZbakRFits/Mix_trimmed_EZbakRFit_withgenewide.rds")
+
+### Codon data
 codon_dict <- fread(
   "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/nuclear_codon_statistics.tsv"
 ) %>%
   as_tibble()
+
+aa_stability <- read_xlsx(
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/Stability_scores_Narula2019.xlsx",
+  skip = 4
+) %>%
+  dplyr::select(`Amino acid`,
+                `hORF14 AASC`) %>%
+  dplyr::mutate(`Amino acid` =
+                  case_when(
+                    `Amino acid` == "M" ~ "Met",
+                    `Amino acid` == "W" ~ "Trp",
+                    `Amino acid` == "F" ~ "Phe",
+                    `Amino acid` == "V" ~ "Val",
+                    `Amino acid` == "D" ~ "Asp",
+                    `Amino acid` == "I" ~ "Ile",
+                    `Amino acid` == "Y" ~ "Tyr",
+                    `Amino acid` == "A" ~ "Ala",
+                    `Amino acid` == "G" ~ "Gly",
+                    `Amino acid` == "K" ~ "Lys",
+                    `Amino acid` == "E" ~ "Glu",
+                    `Amino acid` == "R" ~ "Arg",
+                    `Amino acid` == "L" ~ "Leu",
+                    `Amino acid` == "T" ~ "Thr",
+                    `Amino acid` == "N" ~ "Asn",
+                    `Amino acid` == "P" ~ "Pro",
+                    `Amino acid` == "Q" ~ "Gln",
+                    `Amino acid` == "C" ~ "Cys",
+                    `Amino acid` == "H" ~ "His",
+                    `Amino acid` == "S" ~ "Ser"
+                  )
+  )
+
+codon_stability <- read_xlsx(
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/Stability_scores_codons_Narula2019.xlsx",
+  skip = 5
+) %>%
+  dplyr::mutate(
+    CODON = toupper(Codon)
+  ) %>%
+  dplyr::select(-Codon) %>%
+  dplyr::select(
+    CODON, `ORF14 CSC`
+  )
+
 
 
 abundances <- ezbdo$readcounts$isoform_quant_rsem %>%
@@ -129,20 +531,15 @@ abundances <- ezbdo$readcounts$isoform_quant_rsem %>%
     TPM_avg = mean(TPM[grepl("DMSO", sample)])
   )
 
-CDS <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/CDS_seqs.csv") %>%
-  dplyr::rename(CDS = seq)
-threepUTR <- read_csv("C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/threeprimeUTR_seqs.csv") %>%
-  dplyr::rename(threepUTR = seq)
+CDS <- read_csv(
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/CDS_seqs.csv"
+)
+
 
 abundance_with_seq <- abundances %>%
   dplyr::inner_join(CDS,
                     by = "transcript_id") %>%
-  dplyr::inner_join(threepUTR,
-                    by = "transcript_id") %>%
   dplyr::rowwise() %>%
-  mutate(
-    seq = paste0(CDS, str_sub(threepUTR, 1, 3))
-  ) %>%
   filter(str_length(seq) > 25)
 
 abundant_CDS <- abundance_with_seq %>%
@@ -173,13 +570,23 @@ CDS_codon_tidy <- CDS_codon_counts %>%
     codon_dict %>%
       dplyr::select(CODON, `Amino acid`, RSCU),
     by = "CODON"
+  ) %>%
+  dplyr::inner_join(
+    codon_stability,
+    by = "CODON"
+  ) %>%
+  dplyr::inner_join(
+    aa_stability,
+    by = "Amino acid"
   )
 
 codon_optimality <- CDS_codon_tidy %>%
   group_by(CODON, `Amino acid`) %>%
   summarise(
     RSCU = mean(RSCU),
-    count = sum(count)
+    count = sum(count),
+    CSC = mean(`ORF14 CSC`),
+    AASC = mean(`hORF14 AASC`)
   ) %>%
   group_by(`Amino acid`) %>%
   mutate(
@@ -216,12 +623,253 @@ all_CDS_codon_tidy <- all_CDS_codon_counts %>%
 all_CDS_CAI <- all_CDS_codon_tidy %>%
   dplyr::group_by(transcript_id) %>%
   dplyr::summarise(
-    log_CAI = (1 / sum(count))*sum(log(weight_hogg)*count)
+    log_CAI = (1 / sum(count))*sum(log(weight_hogg)*count),
+    avg_CSC = sum(CSC*count)/sum(count),
+    avg_AASC = sum(AASC*count)/sum(count)
   )
 
-setwd("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/")
+setwd("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/")
 write_csv(all_CDS_CAI,
-          "CAI_codon_scores.csv")
+          "Various_codon_scores.csv")
+
+
+RNAdeg_data_codon <- RNAdeg_data %>%
+  left_join(all_CDS_CAI,
+             by = c("transcript_id"))
+
+write_csv(RNAdeg_data_codon,
+          file = "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_with_codon_scores.csv")
+
+
+# Sequence motifs --------------------------------------------------------------
+
+
+### Load data
+
+promoter_seq <- read_csv("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/promoter_seqs.csv")
+
+threeputr_seq <- read_csv("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/threeprimeUTR_seqs.csv")
+
+CDS_seq <- read_csv("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/CDS_seqs.csv")
+
+fiveputr_seq <- read_csv("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/fiveprimeUTR_seqs.csv")
+
+RNAdeg_data <- read_csv("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_with_codon_scores.csv") %>%
+  dplyr::select(gene_id, gene_name, strand, transcript_id)
+
+
+seq_df <- RNAdeg_data %>%
+  inner_join(promoter_seq %>%
+               dplyr::rename(
+                 promoter_seq = seq
+               ),
+             by = "transcript_id") %>%
+  inner_join(threeputr_seq %>%
+               dplyr::rename(
+                 threeputr_seq = seq
+               ),
+             by = "transcript_id") %>%
+  inner_join(fiveputr_seq %>%
+               dplyr::rename(
+                 fiveputr_seq = seq
+               ),
+             by = "transcript_id") %>%
+  inner_join(CDS_seq %>%
+               dplyr::rename(
+                 CDS_seq = seq
+               ),
+             by = "transcript_id")
+
+
+
+miR_fasta <- readRNAStringSet(
+  "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/HEK293T_miRNA.fa"
+)
+
+miR_seeds <- tibble(
+  name = names(miR_fasta),
+  sequence = sapply(
+    miR_fasta,
+    function(seq){
+      as.character(subseq(seq, start = 2, end = 7))
+    }
+  )
+) %>%
+  dplyr::mutate(
+    sequence = chartr("AGCTN", "TCGAN",sequence) # Complement sequence
+  )
+
+
+### Count miRNA seed sequence hits in each sequence
+
+seq_df$threeputr_miRNAseed_count <- sapply(
+  seq_df[["threeputr_seq"]],
+  function(query_string) {
+    sum(sapply(
+      miR_seeds$sequence,
+      function(seed){
+        str_count(query_string, seed)
+      }
+    ))
+  }
+)
+
+
+seq_df$fiveputr_miRNAseed_count <- sapply(
+  seq_df[["fiveputr_seq"]],
+  function(query_string) {
+    sum(sapply(
+      miR_seeds$sequence,
+      function(seed){
+        str_count(query_string, seed)
+      }
+    ))
+  }
+)
+
+
+seq_df$CDS_miRNAseed_count <- sapply(
+  seq_df[["CDS_seq"]],
+  function(query_string) {
+    sum(sapply(
+      miR_seeds$sequence,
+      function(seed){
+        str_count(query_string, seed)
+      }
+    ))
+  }
+)
+
+
+### Count DRACH motifs in each
+
+seq_df$threeputr_DRACH_count <- str_count(seq_df$threeputr_seq,
+                                          "[TC][GA]AC[ATC]")
+seq_df$fiveputr_DRACH_count <- str_count(seq_df$fiveputr_seq,
+                                          "[TC][GA]AC[ATC]")
+seq_df$CDS_DRACH_count <- str_count(seq_df$CDS_seq,
+                                          "[TC][GA]AC[ATC]")
+
+
+### Merge back into table
+
+RNAdeg_data <- read_csv("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_with_codon_scores.csv")
+
+RNAdeg_data <- RNAdeg_data %>%
+  inner_join(seq_df,
+             by = "transcript_id")
+
+write_csv(RNAdeg_data,
+          "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_all_features.csv")
+
+write_csv(seq_df,
+          "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/Motif_and_miRNAseed_counts.csv")
+
+
+
+# m6A data ---------------------------------------------------------------------
+
+
+##### SCHWARTZ SITES #####
+
+# Gets a couple warnings due to NAs, nothing to worry about though
+sites_df <- read_xlsx("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/m6A_sites_Schwartz2014.xlsx",
+                      sheet = 2)
+gtf_gr <- rtracklayer::import("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/mix_trimmed.gtf")
+
+
+# Convert your data frame to GRanges
+sites_gr <- GRanges(
+  seqnames = sites_df$chr,
+  ranges = IRanges(start = sites_df$position, end = sites_df$position),
+  strand = sites_df$strand
+)
+
+# Ensure your GRanges object from the GTF file has 'transcript_id' and represents exons
+exons_gr <- gtf_gr[gtf_gr$type == "exon"]
+
+# Find overlaps between your sites and the exons
+overlaps <- findOverlaps(sites_gr, exons_gr, ignore.strand = FALSE)
+
+# Extract transcript IDs that overlap with your sites
+overlapping_transcripts <- mcols(exons_gr)$transcript_id[subjectHits(overlaps)]
+
+# Count the number of overlaps per transcript
+m6A_cnt_df <- tibble(
+  transcript_id = overlapping_transcripts
+) %>%
+  dplyr::count(transcript_id)
+
+# Compile all transcript IDs and indicate which contain m6A sites
+all_transcript_ids <- unique(mcols(exons_gr)$transcript_id)
+
+schwartz_df <- tibble(
+  transcript_id = all_transcript_ids
+) %>%
+  dplyr::left_join(m6A_cnt_df,
+                   by = "transcript_id") %>%
+  dplyr::mutate(n = ifelse(is.na(n), 0, n)) %>%
+  dplyr::rename(
+    m6A_site_cnt_Schwartz2014 = n
+  )
+
+
+schwartz_df
+
+
+### Add to table
+RNAdeg_table <- read_csv(
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_all_features.csv"
+)
+
+
+RNAdeg_table <- RNAdeg_table %>%
+  inner_join(schwartz_df,
+             by = "transcript_id")
+
+write_csv(
+  RNAdeg_table,
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/RNAdeg_data_all_features.csv"
+)
+
+write_csv(
+  schwartz_df,
+  "C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/ML_features/SQUANTI_seqs/Schwartz_m6A_overlap.csv"
+)
+
+
+
+# Trimmed mix annotation from the gamut ----------------------------------------
+
+### Curate input
+mix_gtf <- rtracklayer::import("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/factR2/mix_trimmed/mix_trimmed_factR2.gtf")
+isoforms_to_keep <- read_csv(
+  "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/isoforms_to_keep.csv"
+)
+
+# Filter rsome stuff
+mcols(mix_gtf)$ID <- NULL
+mix_gtf <- mix_gtf[!grepl("_", seqnames(mix_gtf))]
+
+transcript_file <- "C:/Users/isaac/Box/TimeLapse/Annotation_gamut/Annotations/factR2/mix_trimmed/mix_trimmed_factR2_transcript.tsv"
+ezbdo <- readRDS("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/EZbakRFits/Mix_trimmed_EZbakRFit_withgenewide.rds")
+
+RNAdeg_data <-  assemble_data(
+  gtf = mix_gtf, factr_transcript_file = transcript_file,
+  isoform_filter = isoforms_to_keep,
+  ezbdo = ezbdo,
+  outdir = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered"
+)
+
+
+clean_table <- clean_feature_table(RNAdeg_data,
+                                   output = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/RNAdeg_feature_table.csv")
+
+seqs <- get_sequencing_info(mix_gtf, outdir = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/filtered/")
+
+threepcheck <- seqs$ThreePrimeUTR
+
+
 
 # Sandbox geneal deg features --------------------------------------------------
 

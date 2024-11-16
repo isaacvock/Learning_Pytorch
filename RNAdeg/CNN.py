@@ -80,10 +80,11 @@ class simpleCNN(nn.Module):
     """
     def __init__(self,
                 input_shape: int,
-                hidden_units: int):
+                hidden_units: int,
+                batch_size: int):
         super().__init__()
         self.block_1 = nn.Sequential(
-            nn.Conv2d(
+            nn.Conv1d(
                 in_channels = input_shape,
                 out_channels = hidden_units,
                 kernel_size= 3,
@@ -91,7 +92,7 @@ class simpleCNN(nn.Module):
                 padding = 1
             ),
             nn.ReLU(),
-            nn.Conv2d(
+            nn.Conv1d(
                 in_channels=hidden_units,
                 out_channels=hidden_units,
                 kernel_size=3,
@@ -99,20 +100,29 @@ class simpleCNN(nn.Module):
                 padding = 1
             ),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2,
-                         stride=2)
+            nn.MaxPool1d(kernel_size=2,
+                            stride=2)
         )
         self.block_2 = nn.Sequential(
-            nn.Conv2d(hidden_units, hidden_units, 3, padding =1 ),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units, 
+                kernel_size = 3, 
+                padding =1
+                ),
             nn.ReLU(),
-            nn.Conv2d(hidden_units, hidden_units, 3, padding = 1),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units, 
+                kernel_size = 3, 
+                padding =1
+            ),
             nn.ReLU(),
-            nn.MaxPool2d(2)
+            nn.MaxPool1d(kernel_size=2)
         )
         self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(in_features = 550,
-                      out_features = 1)
+            nn.Flatten(0, 2),
+            nn.Linear(hidden_units * 550 * batch_size, 1)
         )
 
     def forward(self, x: torch.Tensor):
@@ -121,10 +131,83 @@ class simpleCNN(nn.Module):
 
 
 simple_model = simpleCNN(
-    input_shape = 1,
-    hidden_units=1
+    input_shape = 5,
+    hidden_units=64,
+    batch_size= 32
 ).to(device)
 
+
+### SANDBOX: Walk through each layer of model
+input_shape = 5
+hidden_units = 10
+batch_size = 32
+
+## First block
+test_block_1 = nn.Sequential(
+    nn.Conv1d(
+        in_channels = input_shape,
+        out_channels = hidden_units,
+        kernel_size= 3,
+        stride = 1,
+        padding = 1
+    ),
+    nn.ReLU(),
+    nn.Conv1d(
+        in_channels=hidden_units,
+        out_channels=hidden_units,
+        kernel_size=3,
+        stride = 1,
+        padding = 1
+    ),
+    nn.ReLU(),
+    nn.MaxPool1d(kernel_size=2,
+                    stride=2)
+).to(device)
+
+seq.shape
+# 1 x 5 x 2200
+
+train_features_batch.shape
+
+output_1 = test_block_1(train_features_batch)
+output_1.shape
+# 1 x 3 x 1100
+
+
+## 2nd block
+test_block_2 = nn.Sequential(
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units, 
+                kernel_size = 3, 
+                padding =1
+                ),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units, 
+                kernel_size = 3, 
+                padding =1
+            ),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2)
+        ).to(device)
+
+output_1.shape
+output_2 = test_block_2(output_1)
+output_2.shape
+# 1 x 2 x 551
+
+
+## 3rd block
+test_block_3 = nn.Sequential(
+            nn.Flatten(0, 2),
+            nn.Linear(hidden_units * 550 * batch_size, 1)
+        ).to(device)
+
+output_2.shape
+output_3 = test_block_3(output_2)
+output_3.shape
 
 ### Setup loss function and optimizer
 loss_fn = nn.MSELoss()
@@ -139,15 +222,20 @@ epochs = 10
 train_losses = [0]*10
 for epoch in range(epochs):
 
+    simple_model.train()
+
+
     train_loss = 0
     for batch, (X, kdeg) in enumerate(train_loader):
-        simple_model.train()
-        kdeg_pred = simple_model(X.unsqueeze(dim = 1))
+
+        optimizer.zero_grad()
+
+
+        kdeg_pred = simple_model(X)
 
         loss = loss_fn(kdeg_pred, kdeg)
         train_loss += loss
 
-        optimizer.zero_grad()
 
         loss.backward()
 
@@ -163,7 +251,7 @@ for epoch in range(epochs):
     with torch.inference_mode():
         for X, y in test_loader:
             # 1. Forward pass
-            test_pred = simple_model(X.unsqueeze(dim = 1))
+            test_pred = simple_model(X)
            
             # 2. Calculate loss (accumulatively)
             test_loss += loss_fn(test_pred, y) # accumulatively add up the loss per epoch
