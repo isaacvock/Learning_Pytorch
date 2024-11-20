@@ -18,7 +18,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 features = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\RNAdeg_feature_table.csv")
 features_filter = features.loc[features['avg_lkd_se'] < math.exp(-2)]
 
-promoters = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\promoter_seqs.csv")
+promoters = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\mix_trimmed\\filtered\\threeprimeUTR_seqs.csv")
 
 full_data = pd.merge(features_filter, promoters, on = ['transcript_id'], how = 'inner')
 
@@ -35,7 +35,12 @@ char_to_index = {
 
 
 ### One-hot encode features
-def onehote_np(seq):
+def onehote_np(seq, desired_len = 500):
+    if len(seq) < desired_len:
+        seq = seq + 'N' * (desired_len - len(seq))
+
+    else:
+        seq = seq[:desired_len]
     seq2 = [char_to_index[i] for i in seq]
     return torch.from_numpy(np.eye(5)[seq2])
 
@@ -81,7 +86,7 @@ class simpleCNN(nn.Module):
     def __init__(self,
                 input_shape: int,
                 hidden_units: int,
-                batch_size: int):
+                seq_len: int):
         super().__init__()
         self.block_1 = nn.Sequential(
             nn.Conv1d(
@@ -121,8 +126,8 @@ class simpleCNN(nn.Module):
             nn.MaxPool1d(kernel_size=2)
         )
         self.classifier = nn.Sequential(
-            nn.Flatten(0, 2),
-            nn.Linear(hidden_units * 550 * batch_size, 1)
+            nn.Flatten(1, 2),
+            nn.Linear(seq_len * hidden_units, 1)
         )
 
     def forward(self, x: torch.Tensor):
@@ -133,14 +138,13 @@ class simpleCNN(nn.Module):
 simple_model = simpleCNN(
     input_shape = 5,
     hidden_units=64,
-    batch_size= 32
+    seq_len = 125
 ).to(device)
 
 
 ### SANDBOX: Walk through each layer of model
 input_shape = 5
-hidden_units = 10
-batch_size = 32
+hidden_units = 32
 
 ## First block
 test_block_1 = nn.Sequential(
@@ -201,9 +205,13 @@ output_2.shape
 
 ## 3rd block
 test_block_3 = nn.Sequential(
-            nn.Flatten(0, 2),
-            nn.Linear(hidden_units * 550 * batch_size, 1)
+            nn.Flatten(1, 2),
+            nn.Linear(hidden_units * 550, 1)
         ).to(device)
+
+test_flatten = nn.Flatten(1, 2)
+
+test_flatten(output_2).shape
 
 output_2.shape
 output_3 = test_block_3(output_2)
@@ -233,7 +241,7 @@ for epoch in range(epochs):
 
         kdeg_pred = simple_model(X)
 
-        loss = loss_fn(kdeg_pred, kdeg)
+        loss = loss_fn(kdeg_pred.squeeze(), kdeg)
         train_loss += loss
 
 
@@ -254,7 +262,7 @@ for epoch in range(epochs):
             test_pred = simple_model(X)
            
             # 2. Calculate loss (accumulatively)
-            test_loss += loss_fn(test_pred, y) # accumulatively add up the loss per epoch
+            test_loss += loss_fn(test_pred.squeeze(), y) # accumulatively add up the loss per epoch
 
         # Calculations on test metrics need to happen inside torch.inference_mode()
         # Divide total test loss by length of test dataloader (per batch)
@@ -273,7 +281,7 @@ true_kdeg = []
 with torch.inference_mode():
     for X, y in train_loader:
         
-        y_pred = simple_model(X.unsqueeze(dim = 1))
+        y_pred = simple_model(X)
 
         predicted_kdeg.extend(y_pred.squeeze().cpu().detach().numpy())
         true_kdeg.extend(y.squeeze().cpu().detach().numpy())
