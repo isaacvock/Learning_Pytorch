@@ -9,13 +9,14 @@ from torch import nn
 import numpy as np
 import math
 import torch.utils.data as data_utils
+import statistics
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 ### Load in data
 
-features = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\RNAdeg_feature_table.csv")
+features = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\mix_trimmed\\filtered\\RNAdeg_feature_table.csv")
 features_filter = features.loc[features['avg_lkd_se'] < math.exp(-2)]
 
 promoters = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\mix_trimmed\\filtered\\threeprimeUTR_seqs.csv")
@@ -35,7 +36,7 @@ char_to_index = {
 
 
 ### One-hot encode features
-def onehote_np(seq, desired_len = 500):
+def onehote_np(seq, desired_len = 10000):
     if len(seq) < desired_len:
         seq = seq + 'N' * (desired_len - len(seq))
 
@@ -56,8 +57,11 @@ train_tensor_3d.shape
 
 ### Convert log(kdeg) to Pytorch tensor
 
-train_targets = torch.tensor(train_data['log_kdeg'].values)
-test_targets = torch.tensor(test_data['log_kdeg'].values)
+train_targets = torch.tensor((train_data['log_kdeg'].values - statistics.mean(train_data['log_kdeg'].values)) / np.std(train_data['log_kdeg'].values))
+test_targets = torch.tensor((test_data['log_kdeg'].values - statistics.mean(test_data['log_kdeg'].values)) / np.std(test_data['log_kdeg'].values))
+
+# Normalize
+
 
 ### Create DataLoader
 
@@ -138,96 +142,97 @@ class simpleCNN(nn.Module):
 simple_model = simpleCNN(
     input_shape = 5,
     hidden_units=64,
-    seq_len = 125
+    seq_len = 2500
 ).to(device)
 
 
-### SANDBOX: Walk through each layer of model
-input_shape = 5
-hidden_units = 32
+# ### SANDBOX: Walk through each layer of model
+# input_shape = 5
+# hidden_units = 32
 
-## First block
-test_block_1 = nn.Sequential(
-    nn.Conv1d(
-        in_channels = input_shape,
-        out_channels = hidden_units,
-        kernel_size= 3,
-        stride = 1,
-        padding = 1
-    ),
-    nn.ReLU(),
-    nn.Conv1d(
-        in_channels=hidden_units,
-        out_channels=hidden_units,
-        kernel_size=3,
-        stride = 1,
-        padding = 1
-    ),
-    nn.ReLU(),
-    nn.MaxPool1d(kernel_size=2,
-                    stride=2)
-).to(device)
+# ## First block
+# test_block_1 = nn.Sequential(
+#     nn.Conv1d(
+#         in_channels = input_shape,
+#         out_channels = hidden_units,
+#         kernel_size= 3,
+#         stride = 1,
+#         padding = 1
+#     ),
+#     nn.ReLU(),
+#     nn.Conv1d(
+#         in_channels=hidden_units,
+#         out_channels=hidden_units,
+#         kernel_size=3,
+#         stride = 1,
+#         padding = 1
+#     ),
+#     nn.ReLU(),
+#     nn.MaxPool1d(kernel_size=2,
+#                     stride=2)
+# ).to(device)
 
-seq.shape
-# 1 x 5 x 2200
+# seq.shape
+# # 1 x 5 x 2200
 
-train_features_batch.shape
+# train_features_batch.shape
 
-output_1 = test_block_1(train_features_batch)
-output_1.shape
-# 1 x 3 x 1100
-
-
-## 2nd block
-test_block_2 = nn.Sequential(
-            nn.Conv1d(
-                in_channels = hidden_units,
-                out_channels = hidden_units, 
-                kernel_size = 3, 
-                padding =1
-                ),
-            nn.ReLU(),
-            nn.Conv1d(
-                in_channels = hidden_units,
-                out_channels = hidden_units, 
-                kernel_size = 3, 
-                padding =1
-            ),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2)
-        ).to(device)
-
-output_1.shape
-output_2 = test_block_2(output_1)
-output_2.shape
-# 1 x 2 x 551
+# output_1 = test_block_1(train_features_batch)
+# output_1.shape
+# # 1 x 3 x 1100
 
 
-## 3rd block
-test_block_3 = nn.Sequential(
-            nn.Flatten(1, 2),
-            nn.Linear(hidden_units * 550, 1)
-        ).to(device)
+# ## 2nd block
+# test_block_2 = nn.Sequential(
+#             nn.Conv1d(
+#                 in_channels = hidden_units,
+#                 out_channels = hidden_units, 
+#                 kernel_size = 3, 
+#                 padding =1
+#                 ),
+#             nn.ReLU(),
+#             nn.Conv1d(
+#                 in_channels = hidden_units,
+#                 out_channels = hidden_units, 
+#                 kernel_size = 3, 
+#                 padding =1
+#             ),
+#             nn.ReLU(),
+#             nn.MaxPool1d(kernel_size=2)
+#         ).to(device)
 
-test_flatten = nn.Flatten(1, 2)
+# output_1.shape
+# output_2 = test_block_2(output_1)
+# output_2.shape
+# # 1 x 2 x 551
 
-test_flatten(output_2).shape
 
-output_2.shape
-output_3 = test_block_3(output_2)
-output_3.shape
+# ## 3rd block
+# test_block_3 = nn.Sequential(
+#             nn.Flatten(1, 2),
+#             nn.Linear(hidden_units * 550, 1)
+#         ).to(device)
+
+# test_flatten = nn.Flatten(1, 2)
+
+# test_flatten(output_2).shape
+
+# output_2.shape
+# output_3 = test_block_3(output_2)
+# output_3.shape
 
 ### Setup loss function and optimizer
 loss_fn = nn.MSELoss()
 optimizer = torch.optim.SGD(
     params=simple_model.parameters(),
-    lr = 0.1
+    lr = 0.01
 )
 
 
-epochs = 10
+epochs = 15
 
-train_losses = [0]*10
+train_losses = [0]*epochs
+test_losses = [0]*epochs
 for epoch in range(epochs):
 
     simple_model.train()
@@ -267,6 +272,8 @@ for epoch in range(epochs):
         # Calculations on test metrics need to happen inside torch.inference_mode()
         # Divide total test loss by length of test dataloader (per batch)
         test_loss /= len(test_loader)
+        test_losses[epoch] = test_loss.to('cpu').detach().numpy()
+
 
 
 train_loss
@@ -278,6 +285,10 @@ simple_model.eval()
 predicted_kdeg = []
 true_kdeg = []
 
+predicted_kdeg_test = []
+true_kdeg_test = []
+
+final_test_loss = 0
 with torch.inference_mode():
     for X, y in train_loader:
         
@@ -286,15 +297,36 @@ with torch.inference_mode():
         predicted_kdeg.extend(y_pred.squeeze().cpu().detach().numpy())
         true_kdeg.extend(y.squeeze().cpu().detach().numpy())
 
+    for X, y in test_loader:
+        
+        y_pred = simple_model(X)
+
+        final_test_loss = final_test_loss + loss_fn(y_pred.squeeze(), y)
+
+        predicted_kdeg_test.extend(y_pred.squeeze().cpu().detach().numpy())
+        true_kdeg_test.extend(y.squeeze().cpu().detach().numpy())
+
 
 plt.scatter(true_kdeg,
             predicted_kdeg,
             alpha = 0.5)
-plt.xlabel('True values')
-plt.ylabel('Predicted values')
+plt.xlabel('True values (train)')
+plt.ylabel('Predicted values (train)')
+plt.show()
+
+
+plt.scatter(true_kdeg_test,
+            predicted_kdeg_test,
+            alpha = 0.5)
+plt.xlabel('True values (test)')
+plt.ylabel('Predicted values (test)')
 plt.show()
 
 
 plt.scatter(list(range(epochs)),
             train_losses)
+plt.show()
+
+plt.scatter(list(range(epochs)),
+            test_losses)
 plt.show()
