@@ -18,20 +18,20 @@ gtf <- rtracklayer::import("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/
 gtf_df <- as_tibble(gtf)
 
 
-gtf_df %>%
+ss_df <- gtf_df %>%
+  filter(type == "exon") %>%
   mutate(exon_number = as.numeric(exon_number)) %>%
   group_by(transcript_id) %>%
-  filter(type == "exon" &
-          ( ((exon_number < max(exon_number)) & strand == "+" ) |
-            ((exon_number > min(exon_number)) & strand == "-")  )) %>%
+  filter( ((exon_number < max(exon_number)) & strand == "+" ) |
+            ((exon_number > min(exon_number)) & strand == "-")  ) %>%
   mutate(fivepss = ifelse(
     strand == "+", end - min(start),
     abs(start - max(end))
   ))
 
-get_5pss <- function(gtf){
 
-}
+
+
 
 num_to_one_hot = function (x, bits) {
   diag(1L, bits)[, x]
@@ -54,7 +54,8 @@ OHE_phase <- function(cds){
 
 }
 
-OHE_saluki <- function(fivep, cds, threep){
+OHE_saluki <- function(fivep, cds, threep, splices,
+                       max_nt = 12288){
 
   fivep_ohe <- OHE(fivep)
   cds_ohe <- OHE(cds)
@@ -62,16 +63,53 @@ OHE_saluki <- function(fivep, cds, threep){
   phase_ohe <- c(rep(0, times = nchar(fivep)),
                  OHE_phase(cds),
                  rep(0, times = nchar(threep)))
+  splice_ohe <- seq(from = 1, to = nchar(fivep) + nchar(cds) + nchar(threep))
+  splice_ohe <- ifelse(splice_ohe %in% splices,
+                       1, 0)
+
 
   final_OHE <- do.call(cbind,
                        list(fivep_ohe,
                        cds_ohe,
                        threep_ohe)) %>%
-    rbind(phase_ohe)
+    rbind(phase_ohe) %>%
+    rbind(splice_ohe)
+
+  # Pad or truncate
+  if(ncol(final_OHE) < max_nt){
+
+    cols_to_add <- max_nt - ncol(final_OHE)
+
+    final_OHE <- final_OHE %>%
+      cbind(matrix(0, nrow = 6, ncol = cols_to_add))
+
+
+  }else if(ncol(final_OHE) > max_nt){
+
+    final_OHE <- final_OHE[,1:max_nt]
+
+  }
+
+  return(final_OHE)
 
 }
 
+features_to_ohe <- features %>%
+  dplyr::select(fiveputr_seq,
+                CDS_seq,
+                threeputr_seq)
+
+
+OHEs <- pmap(list(f = fivep_seqs,
+               c = CDS_seqs,
+               t = threep_seqs),
+               function(f, c, t, s){
+                 OHE_saluki(f, c, t, s)
+               })
+
+
 OHE_test <- OHE_saluki(features$fiveputr_seq[1],
                        cds = features$CDS_seq[1],
-                       threep = features$threeputr_seq[1])
+                       threep = features$threeputr_seq[1],
+                       ss_df$fivepss[ss_df$transcript_id == ss_df$transcript_id[1]])
 

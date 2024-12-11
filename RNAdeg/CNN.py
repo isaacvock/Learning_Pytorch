@@ -14,6 +14,111 @@ import statistics
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+##### SALUKI OHE 
+
+features = pd.read_csv("C:\\Users\\isaac\\Box\\TimeLapse\\Annotation_gamut\\DataTables\\RNAdeg_data_model_features.csv")
+
+train_data = features[~features['chrom'].isin(['chr1', 'chr22'])]
+test_data = features[features['chrom'].isin(['chr1', 'chr22'])]
+
+
+
+def num_to_one_hot(x, bits=4):
+    """
+    Equivalent to R's diag(1L, bits)[, x]
+    x is a 1D array of integers (1-based indices).
+    Returns a 2D matrix of shape (bits, len(x)) where each column is a one-hot vector.
+    """
+    # Convert 1-based indexing to 0-based for Python
+    x_zero_based = np.array(x) - 1
+    # Create an identity matrix and index columns
+    # shape: (bits, len(x))
+    one_hot = np.eye(bits)[x_zero_based].T
+    return one_hot
+
+def OHE(seq):
+    """
+    One-hot encodes a DNA sequence. 
+    Maps A->1, C->2, G->3, T->4 and then creates a one-hot (4xN) matrix.
+    """
+    mapping = {'A': 1, 'C': 2, 'G': 3, 'T': 4}
+    indices = [mapping[base] for base in seq]
+    return num_to_one_hot(indices, bits=4)
+
+def OHE_phase(cds):
+    """
+    Computes the phase OHE for the coding region.
+    Returns a 1D array (length = len(cds)), with '1' at positions modulo 3 == 1 (1-based), else '0'.
+    """
+    length = len(cds)
+    positions = np.arange(1, length+1)  # 1-based indexing
+    # positions % 3 == 1 -> phase = 1 else 0
+    phase = np.where((positions % 3) == 1, 1, 0)
+    return phase
+
+def OHE_saluki(fivep, cds, threep, splices = 0, max_nt=12288):
+    """
+    Translates the OHE_saluki R function into Python.
+    fivep, cds, threep: DNA sequences (strings)
+    splices: list/array of splice site positions (1-based along the concatenated transcript)
+    max_nt: desired length to pad or truncate to.
+    Returns: 6 x max_nt numpy array.
+    """
+    # One-hot encode each region (4 x length_of_region)
+    fivep_ohe = OHE(fivep)
+    cds_ohe = OHE(cds)
+    threep_ohe = OHE(threep)
+
+    # Create the phase row
+    total_length = len(fivep) + len(cds) + len(threep)
+    phase_ohe = np.zeros(total_length, dtype=int)
+    phase_ohe[len(fivep):len(fivep)+len(cds)] = OHE_phase(cds)
+
+    # Create the splice row
+    splice_ohe = np.zeros(total_length, dtype=int)
+    # # splices are 1-based positions; ensure not out of range
+    # for s in splices:
+    #     if 1 <= s <= total_length:
+    #         splice_ohe[s-1] = 1
+
+    # Combine OHE into one matrix
+    # final_OHE shape initially: 4 rows (nucleotides), plus 1 row (phase), plus 1 row (splice) = 6 rows
+    final_OHE = np.vstack([
+        np.hstack([fivep_ohe, cds_ohe, threep_ohe]),
+        phase_ohe[np.newaxis, :],
+        splice_ohe[np.newaxis, :]
+    ])
+
+    # Pad or truncate
+    current_len = final_OHE.shape[1]
+    if current_len < max_nt:
+        # Pad with zeros on the right
+        pad_cols = max_nt - current_len
+        final_OHE = np.hstack([final_OHE, np.zeros((6, pad_cols), dtype=int)])
+    elif current_len > max_nt:
+        # Truncate to max_nt
+        final_OHE = final_OHE[:, :max_nt]
+
+    return final_OHE
+
+
+tensors = []
+for idx, row in train_data.iterrows():
+    fivep = row['fiveputr_seq']
+    cds = row['CDS_seq']
+    threep = row['threeputr_seq']
+    #splices = row['splice_sites']
+
+    encoded = OHE_saluki(fivep, cds, threep)
+    tensors.append(encoded)
+
+
+tensor_3d = torch.tensor(np.array(tensors))
+
+
+##### ME HACKING AROUND
+
+
 ### Load in data
 
 features = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\mix_trimmed\\filtered\\RNAdeg_feature_table.csv")
