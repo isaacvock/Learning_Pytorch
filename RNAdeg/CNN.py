@@ -18,6 +18,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 features = pd.read_csv("C:\\Users\\isaac\\Box\\TimeLapse\\Annotation_gamut\\DataTables\\RNAdeg_data_model_features.csv")
 
+ss_df = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\mix_trimed_fivepss_indices.csv")
+
+
 train_data = features[~features['chrom'].isin(['chr1', 'chr22'])]
 test_data = features[features['chrom'].isin(['chr1', 'chr22'])]
 
@@ -56,7 +59,7 @@ def OHE_phase(cds):
     phase = np.where((positions % 3) == 1, 1, 0)
     return phase
 
-def OHE_saluki(fivep, cds, threep, splices = 0, max_nt=12288):
+def OHE_saluki(fivep, cds, threep, splices, max_nt=12288):
     """
     Translates the OHE_saluki R function into Python.
     fivep, cds, threep: DNA sequences (strings)
@@ -80,6 +83,9 @@ def OHE_saluki(fivep, cds, threep, splices = 0, max_nt=12288):
     # for s in splices:
     #     if 1 <= s <= total_length:
     #         splice_ohe[s-1] = 1
+    for s in splices:
+        if 1 <= s <= max_nt:
+            splice_ohe[s-1] = 1
 
     # Combine OHE into one matrix
     # final_OHE shape initially: 4 rows (nucleotides), plus 1 row (phase), plus 1 row (splice) = 6 rows
@@ -107,9 +113,10 @@ for idx, row in train_data.iterrows():
     fivep = row['fiveputr_seq']
     cds = row['CDS_seq']
     threep = row['threeputr_seq']
-    #splices = row['splice_sites']
+    transcript_id = row['transcript_id']
+    splices = ss_df.loc[ss_df['transcript_id'] == transcript_id, 'fivepss'].tolist()
 
-    encoded = OHE_saluki(fivep, cds, threep)
+    encoded = OHE_saluki(fivep, cds, threep, splices)
     tensors.append(encoded)
 
 

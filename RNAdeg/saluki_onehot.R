@@ -10,27 +10,106 @@ library(rtracklayer)
 library(GenomicFeatures)
 library(Biostrings)
 library(dplyr)
+library(stringr)
+
 
 # Full Saluki one-hot encoding -------------------------------------------------
 
 features <- fread("C:/Users/isaac/Box/TimeLapse/Annotation_gamut/DataTables/RNAdeg_data_model_features.csv")
+
+
+features %>% dplyr::count(gene_id) %>% dplyr::count(n)
+
+length(unique(TSSs))
+
+
 gtf <- rtracklayer::import("C:/Users/isaac/Documents/Simon_Lab/Isoform_Kinetics/Data/Annotation_gamut_analyses/Annotations/mix_trimmed.gtf")
+
+fivepss_df <- tibble()
+txs <- unique(gtf$transcript_id)
+for(t in unique(gtf$transcript_id)){
+
+  exons <- gtf[gtf$transcript_id == t & gtf$type == "exon"]
+
+  if(all(strand(exons) == "+")){
+
+    widths <- width(exons)
+    positions <- cumsum(widths)
+    fivepss <- positions[1:(length(positions) - 1)]
+
+  }else{
+
+    widths <- width(exons)
+    positions <- cumsum(widths)
+    positions <- abs(positions - positions[length(positions)]) + 1
+    fivepss <- positions[(length(positions)-1):1]
+
+
+  }
+
+  fivepss_df <- bind_rows(
+    fivepss_df,
+    tibble(transcript_id = t,
+           fivepss = fivepss)
+  )
+
+  print(paste0((which(txs == t) / length(txs))*100, "% done"))
+
+}
+
+
+write_csv(fivepss_df,
+          file = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimed_fivepss_indices.csv")
+
+
+
+widths <- width(test_exons)
+positions <- cumsum(widths)
+fivepss <- positions[1:(length(positions) - 1)]
+
+txdb <- makeTxDbFromGRanges(gtf)
+
+gtf_tx <- exonsBy(txdb, by = "tx", use.names = TRUE)
+gtf_tx$MSTRG.2.1
+
 gtf_df <- as_tibble(gtf)
 
+# Split by transcript
+transcripts <- split(gtf, gtf$transcript_id)
+
+# Reduce the ranges within each transcript
+reduced_transcripts <- reduce(transcripts)
 
 ss_df <- gtf_df %>%
   filter(type == "exon") %>%
   mutate(exon_number = as.numeric(exon_number)) %>%
-  group_by(transcript_id) %>%
-  filter( ((exon_number < max(exon_number)) & strand == "+" ) |
-            ((exon_number > min(exon_number)) & strand == "-")  ) %>%
-  mutate(fivepss = ifelse(
-    strand == "+", end - min(start),
-    abs(start - max(end))
-  ))
+  dplyr::group_by(transcript_id) %>%
+  mutate(
+    start = min(start)
+  )
+
+ss_df
+
+# 1 3
+# 10 14
+# 20 22
+# 100 124
+#
+# 1 3
+# 4 8
+# 9 11
+# 12 36
+
+ss_df %>%
+  filter(transcript_id == "MSTRG.11206.1") %>%
+  dplyr::select(strand, fivepss, exon_number, exonic_start, exonic_end, start, end, exon_number)
+
+ss_table <- ss_df %>%
+  dplyr::select(transcript_id, fivepss)
 
 
-
+write_csv(ss_table,
+          file = "C:/Users/isaac/Documents/ML_pytorch/Data/RNAdeg/mix_trimmed/fivep_splice_sites.csv")
 
 
 num_to_one_hot = function (x, bits) {
