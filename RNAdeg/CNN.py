@@ -24,6 +24,7 @@ ss_df = pd.read_csv("C:\\Users\\isaac\\Documents\\ML_pytorch\\Data\\RNAdeg\\mix_
 train_data = features[~features['chrom'].isin(['chr1', 'chr22'])]
 test_data = features[features['chrom'].isin(['chr1', 'chr22'])]
 
+print(train_data.columns)
 
 
 def num_to_one_hot(x, bits=4):
@@ -120,7 +121,231 @@ for idx, row in train_data.iterrows():
     tensors.append(encoded)
 
 
-tensor_3d = torch.tensor(np.array(tensors))
+train_tensor_3d = torch.tensor(np.array(tensors))
+
+
+tensors = []
+for idx, row in test_data.iterrows():
+    fivep = row['fiveputr_seq']
+    cds = row['CDS_seq']
+    threep = row['threeputr_seq']
+    transcript_id = row['transcript_id']
+    splices = ss_df.loc[ss_df['transcript_id'] == transcript_id, 'fivepss'].tolist()
+
+    encoded = OHE_saluki(fivep, cds, threep, splices)
+    tensors.append(encoded)
+
+test_tensor_3d = torch.tensor(np.array(tensors))
+
+
+### Convert log(kdeg) to Pytorch tensor
+
+train_targets = torch.tensor((train_data['log_kdeg_DMSO'].values - statistics.mean(train_data['log_kdeg_DMSO'].values)) / np.std(train_data['log_kdeg_DMSO'].values))
+test_targets = torch.tensor((test_data['log_kdeg_DMSO'].values - statistics.mean(test_data['log_kdeg_DMSO'].values)) / np.std(test_data['log_kdeg_DMSO'].values))
+
+# Normalize
+
+
+### Create DataLoader
+
+train = data_utils.TensorDataset(train_tensor_3d.permute(0, 2, 1).float().to(device), train_targets.float().to(device))
+train_loader = data_utils.DataLoader(train, batch_size = 32, shuffle=True)
+
+test = data_utils.TensorDataset(test_tensor_3d.permute(0, 2, 1).float().to(device), test_targets.float().to(device))
+test_loader = data_utils.DataLoader(test, batch_size = 32, shuffle=True)
+
+
+# Shape of data: [11963, 2200, 5]
+# Basically single channel image that is 2200 pixels wide and 5 pixels tall
+train_features_batch, train_labels_batch = next(iter(train_loader))
+train_features_batch.shape, train_labels_batch.shape
+
+seq, label = train_features_batch[1], train_labels_batch[1]
+
+
+
+### Build model
+
+class simpleCNN(nn.Module):
+    """
+    Just want to get a CNN working with this data
+    """
+    def __init__(self,
+                input_shape: int,
+                hidden_units: int,
+                seq_len: int):
+        super().__init__()
+        self.block_1 = nn.Sequential(
+            nn.Conv1d(
+                in_channels = input_shape,
+                out_channels = hidden_units,
+                kernel_size= 3,
+                stride = 1,
+                padding = 1
+            ),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels=hidden_units,
+                out_channels=hidden_units,
+                kernel_size=3,
+                stride = 1,
+                padding = 1
+            ),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2,
+                            stride=2)
+        )
+        self.block_2 = nn.Sequential(
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units, 
+                kernel_size = 3, 
+                padding =1
+                ),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units, 
+                kernel_size = 3, 
+                padding =1
+            ),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2)
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(1, 2),
+            nn.Linear(seq_len * hidden_units, 1)
+        )
+
+    def forward(self, x: torch.Tensor):
+        x = self.classifier(self.block_2(self.block_1(x)))
+        return x
+
+
+simple_model = simpleCNN(
+    input_shape = 6,
+    hidden_units=64,
+    seq_len = 12288
+).to(device)
+
+simple_model(train_features_batch.transpose(1, 2))
+train_features_batch.transpose(1, 2).shape
+
+### Setup loss function and optimizer
+loss_fn = nn.MSELoss()
+optimizer = torch.optim.SGD(
+    params=simple_model.parameters(),
+    lr = 0.01
+)
+
+
+epochs = 15
+
+train_losses = [0]*epochs
+test_losses = [0]*epochs
+for epoch in range(epochs):
+
+    simple_model.train()
+
+
+    train_loss = 0
+    for batch, (X, kdeg) in enumerate(train_loader):
+
+        optimizer.zero_grad()
+
+
+        kdeg_pred = simple_model(X.transpose(1,2))
+
+        loss = loss_fn(kdeg_pred.squeeze(), kdeg)
+        train_loss += loss
+
+
+        loss.backward()
+
+        optimizer.step()
+
+    train_loss /= len(train_loader)
+    train_losses[epoch] = train_loss.to('cpu').detach().numpy()
+
+    ### Testing
+    # Setup variables for accumulatively adding up loss and accuracy 
+    test_loss = 0
+    simple_model.eval()
+    with torch.inference_mode():
+        for X, y in test_loader:
+            # 1. Forward pass
+            test_pred = simple_model(X.transpose(1,2))
+           
+            # 2. Calculate loss (accumulatively)
+            test_loss += loss_fn(test_pred.squeeze(), y) # accumulatively add up the loss per epoch
+
+        # Calculations on test metrics need to happen inside torch.inference_mode()
+        # Divide total test loss by length of test dataloader (per batch)
+        test_loss /= len(test_loader)
+        test_losses[epoch] = test_loss.to('cpu').detach().numpy()
+
+
+
+train_loss
+test_loss
+
+### Now plot estimate vs. truth
+simple_model.eval()
+
+predicted_kdeg = []
+true_kdeg = []
+
+predicted_kdeg_test = []
+true_kdeg_test = []
+
+final_test_loss = 0
+with torch.inference_mode():
+    for X, y in train_loader:
+        
+        y_pred = simple_model(X)
+
+        predicted_kdeg.extend(y_pred.squeeze().cpu().detach().numpy())
+        true_kdeg.extend(y.squeeze().cpu().detach().numpy())
+
+    for X, y in test_loader:
+        
+        y_pred = simple_model(X)
+
+        final_test_loss = final_test_loss + loss_fn(y_pred.squeeze(), y)
+
+        predicted_kdeg_test.extend(y_pred.squeeze().cpu().detach().numpy())
+        true_kdeg_test.extend(y.squeeze().cpu().detach().numpy())
+
+
+plt.scatter(true_kdeg,
+            predicted_kdeg,
+            alpha = 0.5)
+plt.xlabel('True values (train)')
+plt.ylabel('Predicted values (train)')
+plt.show()
+
+
+plt.scatter(true_kdeg_test,
+            predicted_kdeg_test,
+            alpha = 0.5)
+plt.xlabel('True values (test)')
+plt.ylabel('Predicted values (test)')
+plt.show()
+
+
+plt.scatter(list(range(epochs)),
+            train_losses)
+plt.show()
+
+plt.scatter(list(range(epochs)),
+            test_losses)
+plt.show()
+
+
+
+
+
+
 
 
 ##### ME HACKING AROUND
