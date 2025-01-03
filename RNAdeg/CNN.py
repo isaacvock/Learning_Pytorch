@@ -10,6 +10,7 @@ import numpy as np
 import math
 import torch.utils.data as data_utils
 import statistics
+import math
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -166,6 +167,16 @@ seq, label = train_features_batch[1], train_labels_batch[1]
 
 ### Build model
 
+def calc_size_after_pool(Lin, ksize, padding = 0,
+                         dilation = 1, stride = None):
+    
+    if stride is None:
+        stride = ksize
+
+    Lout = ((Lin + 2 * padding - dilation * (ksize - 1) - 1) / stride) + 1
+    Lout = math.floor(Lout)
+    return Lout
+
 class simpleCNN(nn.Module):
     """
     Just want to get a CNN working with this data
@@ -173,48 +184,83 @@ class simpleCNN(nn.Module):
     def __init__(self,
                 input_shape: int,
                 hidden_units: int,
-                seq_len: int):
+                seq_len: int,
+                ksize: int = 2,
+                dilation: int = 1,
+                padding: int = 0,
+                stride: int = None):
+        
+        if stride is None:
+            stride = ksize
+
         super().__init__()
         self.block_1 = nn.Sequential(
+            nn.LayerNorm([input_shape, seq_len]),
+            nn.ReLU(),
             nn.Conv1d(
                 in_channels = input_shape,
                 out_channels = hidden_units,
-                kernel_size= 3,
-                stride = 1,
-                padding = 1
+                kernel_size= 5,
             ),
-            nn.ReLU(),
-            nn.Conv1d(
-                in_channels=hidden_units,
-                out_channels=hidden_units,
-                kernel_size=3,
-                stride = 1,
-                padding = 1
-            ),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2,
-                            stride=2)
+            nn.Dropout(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
         )
+
+        Lout = calc_size_after_pool(seq_len, ksize = 5)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
+
         self.block_2 = nn.Sequential(
-            nn.Conv1d(
-                in_channels = hidden_units,
-                out_channels = hidden_units, 
-                kernel_size = 3, 
-                padding =1
-                ),
+            nn.LayerNorm([hidden_units, Lout]),
             nn.ReLU(),
             nn.Conv1d(
                 in_channels = hidden_units,
-                out_channels = hidden_units, 
-                kernel_size = 3, 
-                padding =1
+                out_channels = hidden_units,
+                kernel_size= 5
             ),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2)
+            nn.Dropout(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
         )
+
+        Lout = calc_size_after_pool(Lout, ksize = 5)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
+        self.block_3 = nn.Sequential(
+            nn.LayerNorm([hidden_units, Lout]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units,
+                kernel_size= 5
+            ),
+            nn.Dropout(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(Lout, ksize = 5)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
         self.classifier = nn.Sequential(
             nn.Flatten(1, 2),
-            nn.Linear(seq_len * hidden_units, 1)
+            nn.Linear(Lout * hidden_units, 1)
         )
 
     def forward(self, x: torch.Tensor):
@@ -230,6 +276,83 @@ simple_model = simpleCNN(
 
 simple_model(train_features_batch.transpose(1, 2))
 train_features_batch.transpose(1, 2).shape
+
+m = nn.Conv1d(in_channels = 6, out_channels=64, kernel_size=1, stride=2)
+input = torch.randn(32, 6, 12288)
+output = m(input)
+output.shape
+
+###### BEGIN TESTING OF MODEL ARCHITECTURE
+input_shape = 6
+hidden_units = 64
+seq_len = 12288
+ksize = 2
+padding = 0
+dilation = 1
+stride = 2
+
+testblock_1 = nn.Sequential(
+            nn.Conv1d(
+                in_channels = input_shape,
+                out_channels = hidden_units,
+                kernel_size= 1,
+            ),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding),
+            nn.ReLU()
+        ).to(device)
+
+Lout = calc_size_after_pool(seq_len, ksize = ksize,
+                            stride = stride,
+                            padding = padding,
+                            dilation = dilation)
+
+testblock_2 = nn.Sequential(
+    nn.Conv1d(
+        in_channels = hidden_units,
+        out_channels = hidden_units, 
+        kernel_size = 3, 
+        padding =1
+        ),
+    nn.ReLU(),
+    nn.Conv1d(
+        in_channels = hidden_units,
+        out_channels = hidden_units, 
+        kernel_size = 3, 
+        padding =1
+    ),
+    nn.ReLU(),
+    nn.MaxPool1d(kernel_size=ksize,
+                    stride=stride,
+                    dilation = dilation,
+                    padding = padding)
+).to(device)
+
+Lout = calc_size_after_pool(Lout, ksize = ksize,
+                            stride = stride,
+                            padding = padding,
+                            dilation = dilation)
+
+testclassifier = nn.Sequential(
+    nn.Flatten(1, 2),
+    nn.Linear(Lout * hidden_units, 1)
+).to(device)
+
+testout1 = testblock_1(train_features_batch.transpose(1, 2))
+testout1.shape
+testout2 = testblock_2(testout1)
+testout2.shape
+testoutc = testclassifier(testout2)
+
+testf = nn.Flatten(1,2)
+testoutf = testf(testout2)
+testout2.shape
+testoutf.shape
+
+###### FINISH MODEL ARCH TESTING
 
 ### Setup loss function and optimizer
 loss_fn = nn.MSELoss()
@@ -302,14 +425,14 @@ final_test_loss = 0
 with torch.inference_mode():
     for X, y in train_loader:
         
-        y_pred = simple_model(X)
+        y_pred = simple_model(X.transpose(1,2))
 
         predicted_kdeg.extend(y_pred.squeeze().cpu().detach().numpy())
         true_kdeg.extend(y.squeeze().cpu().detach().numpy())
 
     for X, y in test_loader:
         
-        y_pred = simple_model(X)
+        y_pred = simple_model(X.transpose(1,2))
 
         final_test_loss = final_test_loss + loss_fn(y_pred.squeeze(), y)
 
