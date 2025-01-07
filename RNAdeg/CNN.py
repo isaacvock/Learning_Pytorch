@@ -203,13 +203,14 @@ class simpleCNN(nn.Module):
                 kernel_size= 5,
             ),
             nn.Dropout(),
+            nn.ReLU(),
             nn.MaxPool1d(kernel_size=ksize,
                             stride=stride,
                             dilation = dilation,
                             padding = padding)
         )
 
-        Lout = calc_size_after_pool(seq_len, ksize = 5)
+        Lout = calc_size_after_pool(seq_len, ksize = 5, stride = 1)
         Lout = calc_size_after_pool(Lout, ksize = ksize,
                                     stride = stride,
                                     padding = padding,
@@ -225,13 +226,14 @@ class simpleCNN(nn.Module):
                 kernel_size= 5
             ),
             nn.Dropout(),
+            nn.ReLU(),
             nn.MaxPool1d(kernel_size=ksize,
                             stride=stride,
                             dilation = dilation,
                             padding = padding)
         )
 
-        Lout = calc_size_after_pool(Lout, ksize = 5)
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
         Lout = calc_size_after_pool(Lout, ksize = ksize,
                                     stride = stride,
                                     padding = padding,
@@ -246,13 +248,14 @@ class simpleCNN(nn.Module):
                 kernel_size= 5
             ),
             nn.Dropout(),
+            nn.ReLU(),
             nn.MaxPool1d(kernel_size=ksize,
                             stride=stride,
                             dilation = dilation,
                             padding = padding)
         )
 
-        Lout = calc_size_after_pool(Lout, ksize = 5)
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
         Lout = calc_size_after_pool(Lout, ksize = ksize,
                                     stride = stride,
                                     padding = padding,
@@ -264,7 +267,7 @@ class simpleCNN(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        x = self.classifier(self.block_2(self.block_1(x)))
+        x = self.classifier(self.block_3(self.block_2(self.block_1(x))))
         return x
 
 
@@ -277,92 +280,15 @@ simple_model = simpleCNN(
 simple_model(train_features_batch.transpose(1, 2))
 train_features_batch.transpose(1, 2).shape
 
-m = nn.Conv1d(in_channels = 6, out_channels=64, kernel_size=1, stride=2)
-input = torch.randn(32, 6, 12288)
-output = m(input)
-output.shape
-
-###### BEGIN TESTING OF MODEL ARCHITECTURE
-input_shape = 6
-hidden_units = 64
-seq_len = 12288
-ksize = 2
-padding = 0
-dilation = 1
-stride = 2
-
-testblock_1 = nn.Sequential(
-            nn.Conv1d(
-                in_channels = input_shape,
-                out_channels = hidden_units,
-                kernel_size= 1,
-            ),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=ksize,
-                            stride=stride,
-                            dilation = dilation,
-                            padding = padding),
-            nn.ReLU()
-        ).to(device)
-
-Lout = calc_size_after_pool(seq_len, ksize = ksize,
-                            stride = stride,
-                            padding = padding,
-                            dilation = dilation)
-
-testblock_2 = nn.Sequential(
-    nn.Conv1d(
-        in_channels = hidden_units,
-        out_channels = hidden_units, 
-        kernel_size = 3, 
-        padding =1
-        ),
-    nn.ReLU(),
-    nn.Conv1d(
-        in_channels = hidden_units,
-        out_channels = hidden_units, 
-        kernel_size = 3, 
-        padding =1
-    ),
-    nn.ReLU(),
-    nn.MaxPool1d(kernel_size=ksize,
-                    stride=stride,
-                    dilation = dilation,
-                    padding = padding)
-).to(device)
-
-Lout = calc_size_after_pool(Lout, ksize = ksize,
-                            stride = stride,
-                            padding = padding,
-                            dilation = dilation)
-
-testclassifier = nn.Sequential(
-    nn.Flatten(1, 2),
-    nn.Linear(Lout * hidden_units, 1)
-).to(device)
-
-testout1 = testblock_1(train_features_batch.transpose(1, 2))
-testout1.shape
-testout2 = testblock_2(testout1)
-testout2.shape
-testoutc = testclassifier(testout2)
-
-testf = nn.Flatten(1,2)
-testoutf = testf(testout2)
-testout2.shape
-testoutf.shape
-
-###### FINISH MODEL ARCH TESTING
-
 ### Setup loss function and optimizer
 loss_fn = nn.MSELoss()
 optimizer = torch.optim.SGD(
     params=simple_model.parameters(),
-    lr = 0.01
+    lr = 0.001
 )
 
 
-epochs = 15
+epochs = 10
 
 train_losses = [0]*epochs
 test_losses = [0]*epochs
