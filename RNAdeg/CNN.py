@@ -1,6 +1,7 @@
 ### PURPOSE OF THIS SCRIPT
-# Build a CNN trained on promoter sequences to predict isoform stabilities, because
-# I am really curious as to how well such a prediction will work.
+# Implement the Saluki model (Agarwal and Kelley 2022) in Pytorch
+# so I can learn but also so I can retrain it on improved isoform-level
+# degradation rate constant estimates
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -177,7 +178,7 @@ def calc_size_after_pool(Lin, ksize, padding = 0,
     Lout = math.floor(Lout)
     return Lout
 
-class simpleCNN(nn.Module):
+class SalukiCNN(nn.Module):
     """
     Just want to get a CNN working with this data
     """
@@ -271,9 +272,59 @@ class simpleCNN(nn.Module):
         return x
 
 
+
+class simpleCNN(nn.Module):
+    """
+    Just want to get a CNN working with this data
+    """
+    def __init__(self,
+                input_shape: int,
+                hidden_units: int,
+                seq_len: int,
+                ksize: int = 2,
+                dilation: int = 1,
+                padding: int = 0,
+                stride: int = None):
+        
+        if stride is None:
+            stride = ksize
+
+        super().__init__()
+        self.block_1 = nn.Sequential(
+            nn.LayerNorm([input_shape, seq_len]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = input_shape,
+                out_channels = hidden_units,
+                kernel_size= 5,
+            ),
+            nn.Dropout(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(seq_len, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
+        self.classifier = nn.Sequential(
+            nn.Flatten(1, 2),
+            nn.Linear(Lout * hidden_units, 1)
+        )
+
+    def forward(self, x: torch.Tensor):
+        x = self.classifier((self.block_1(x)))
+        return x
+
+
+
 simple_model = simpleCNN(
     input_shape = 6,
-    hidden_units=64,
+    hidden_units=12,
     seq_len = 12288
 ).to(device)
 
@@ -282,9 +333,8 @@ train_features_batch.transpose(1, 2).shape
 
 ### Setup loss function and optimizer
 loss_fn = nn.MSELoss()
-optimizer = torch.optim.SGD(
-    params=simple_model.parameters(),
-    lr = 0.001
+optimizer = torch.optim.Adam(
+    params=simple_model.parameters()
 )
 
 
@@ -365,6 +415,8 @@ with torch.inference_mode():
         predicted_kdeg_test.extend(y_pred.squeeze().cpu().detach().numpy())
         true_kdeg_test.extend(y.squeeze().cpu().detach().numpy())
 
+
+np.mean(true_kdeg)
 
 plt.scatter(true_kdeg,
             predicted_kdeg,
