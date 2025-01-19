@@ -151,10 +151,10 @@ test_targets = torch.tensor((test_data['log_kdeg_DMSO'].values - statistics.mean
 ### Create DataLoader
 
 train = data_utils.TensorDataset(train_tensor_3d.permute(0, 2, 1).float().to(device), train_targets.float().to(device))
-train_loader = data_utils.DataLoader(train, batch_size = 32, shuffle=True)
+train_loader = data_utils.DataLoader(train, batch_size = 64, shuffle=True)
 
 test = data_utils.TensorDataset(test_tensor_3d.permute(0, 2, 1).float().to(device), test_targets.float().to(device))
-test_loader = data_utils.DataLoader(test, batch_size = 32, shuffle=True)
+test_loader = data_utils.DataLoader(test, batch_size = 64, shuffle=True)
 
 
 # Shape of data: [11963, 2200, 5]
@@ -262,54 +262,72 @@ class SalukiCNN(nn.Module):
                                     padding = padding,
                                     dilation = dilation)
 
-        self.classifier = nn.Sequential(
-            nn.Flatten(1, 2),
-            nn.Linear(Lout * hidden_units, 1)
-        )
-
-    def forward(self, x: torch.Tensor):
-        x = self.classifier(self.block_3(self.block_2(self.block_1(x))))
-        return x
-
-
-
-class simpleCNN(nn.Module):
-    """
-    Just want to get a CNN working with this data
-    """
-    def __init__(self,
-                input_shape: int,
-                hidden_units: int,
-                seq_len: int,
-                ksize: int = 2,
-                dilation: int = 1,
-                padding: int = 0,
-                stride: int = None):
-        
-        if stride is None:
-            stride = ksize
-
-        super().__init__()
-        self.block_1 = nn.Sequential(
-            nn.LayerNorm([input_shape, seq_len]),
+        self.block_4 = nn.Sequential(
+            nn.LayerNorm([hidden_units, Lout]),
             nn.ReLU(),
             nn.Conv1d(
-                in_channels = input_shape,
+                in_channels = hidden_units,
                 out_channels = hidden_units,
-                kernel_size= 5,
+                kernel_size= 5
             ),
             nn.Dropout(),
+            nn.ReLU(),
             nn.MaxPool1d(kernel_size=ksize,
                             stride=stride,
                             dilation = dilation,
                             padding = padding)
         )
 
-        Lout = calc_size_after_pool(seq_len, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
         Lout = calc_size_after_pool(Lout, ksize = ksize,
                                     stride = stride,
                                     padding = padding,
                                     dilation = dilation)
+
+        self.block_5 = nn.Sequential(
+            nn.LayerNorm([hidden_units, Lout]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units,
+                kernel_size= 5
+            ),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
+
+        self.block_6 = nn.Sequential(
+            nn.LayerNorm([hidden_units, Lout]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units,
+                kernel_size= 5
+            ),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)                                  
 
         self.classifier = nn.Sequential(
             nn.Flatten(1, 2),
@@ -317,12 +335,12 @@ class simpleCNN(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        x = self.classifier((self.block_1(x)))
+        x = self.classifier(self.block_6(self.block_5(self.block_4(self.block_3(self.block_2(self.block_1(x)))))))
         return x
 
 
 
-simple_model = simpleCNN(
+simple_model = SalukiCNN(
     input_shape = 6,
     hidden_units=12,
     seq_len = 12288
@@ -334,11 +352,12 @@ train_features_batch.transpose(1, 2).shape
 ### Setup loss function and optimizer
 loss_fn = nn.MSELoss()
 optimizer = torch.optim.Adam(
-    params=simple_model.parameters()
+    params=simple_model.parameters(),
+    betas=(0.9, 0.98)
 )
 
 
-epochs = 10
+epochs = 25
 
 train_losses = [0]*epochs
 test_losses = [0]*epochs
