@@ -329,18 +329,174 @@ class SalukiCNN(nn.Module):
                                     padding = padding,
                                     dilation = dilation)                                  
 
+        # self.classifier = nn.Sequential(
+        #     nn.Flatten(1, 2),
+        #     nn.Linear(Lout * hidden_units, 1)
+        # )
+
+        hidden_size = hidden_units * 2
+
+        self.gru = nn.Sequential(
+            nn.LayerNorm([Lout, hidden_units]),
+            nn.ReLU(),
+            nn.GRU(hidden_units, hidden_size = hidden_size,
+            batch_first=True),
+        )
+
         self.classifier = nn.Sequential(
-            nn.Flatten(1, 2),
-            nn.Linear(Lout * hidden_units, 1)
+            nn.BatchNorm1d(hidden_units*2),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1)
         )
 
     def forward(self, x: torch.Tensor):
-        x = self.classifier(self.block_6(self.block_5(self.block_4(self.block_3(self.block_2(self.block_1(x)))))))
-        return x
+        x = self.gru(self.block_6(self.block_5(self.block_4(self.block_3(self.block_2(self.block_1(x)))))).transpose(1,2))
+        most_5prime_out = x[:,0,:]
+        kdeg_est = self.classifier(most_5prime_out)
+        return kdeg_est
+
+
+class ModSalukiCNN(nn.Module):
+    """
+    Modify the Saluki CNN
+    """
+    def __init__(self,
+                input_shape: int,
+                hidden_units: int,
+                seq_len: int,
+                ksize: int = 2,
+                dilation: int = 1,
+                padding: int = 0,
+                stride: int = None):
+        
+        if stride is None:
+            stride = ksize
+
+        super().__init__()
+        self.block_1 = nn.Sequential(
+            nn.LayerNorm([input_shape, seq_len]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = input_shape,
+                out_channels = hidden_units,
+                kernel_size= 5,
+            ),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(seq_len, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
+
+        self.block_2 = nn.Sequential(
+            nn.LayerNorm([hidden_units, Lout]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units,
+                kernel_size= 5
+            ),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
+        self.block_3 = nn.Sequential(
+            nn.LayerNorm([hidden_units, Lout]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units,
+                kernel_size= 5
+            ),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)
+
+        self.block_4 = nn.Sequential(
+            nn.LayerNorm([hidden_units, Lout]),
+            nn.ReLU(),
+            nn.Conv1d(
+                in_channels = hidden_units,
+                out_channels = hidden_units,
+                kernel_size= 5
+            ),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=ksize,
+                            stride=stride,
+                            dilation = dilation,
+                            padding = padding)
+        )
+
+        Lout = calc_size_after_pool(Lout, ksize = 5, stride = 1)
+        Lout = calc_size_after_pool(Lout, ksize = ksize,
+                                    stride = stride,
+                                    padding = padding,
+                                    dilation = dilation)                               
+
+        # self.classifier = nn.Sequential(
+        #     nn.Flatten(1, 2),
+        #     nn.Linear(Lout * hidden_units, 1)
+        # )
+        hidden_size = hidden_units * 2
+
+        self.gru = nn.Sequential(
+            nn.LayerNorm([Lout, hidden_units]),
+            nn.ReLU(),
+            nn.GRU(hidden_units, hidden_size = hidden_size,
+            batch_first=True),
+        )
+
+        self.classifier = nn.Sequential(
+            nn.BatchNorm1d(hidden_units*2),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1)
+        )
+
+    def forward(self, x: torch.Tensor):
+        x, _ = self.gru(self.block_4(self.block_3(self.block_2(self.block_1(x)))).transpose(1,2))
+        most_5prime_out = x[:,0,:]
+        kdeg_est = self.classifier(most_5prime_out)
+        return kdeg_est
 
 
 
-simple_model = SalukiCNN(
+
+simple_model = ModSalukiCNN(
     input_shape = 6,
     hidden_units=12,
     seq_len = 12288
@@ -357,7 +513,7 @@ optimizer = torch.optim.Adam(
 )
 
 
-epochs = 25
+epochs = 15
 
 train_losses = [0]*epochs
 test_losses = [0]*epochs
