@@ -353,7 +353,7 @@ class SalukiCNN(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        x = self.gru(self.block_6(self.block_5(self.block_4(self.block_3(self.block_2(self.block_1(x)))))).transpose(1,2))
+        x, _ = self.gru(self.block_6(self.block_5(self.block_4(self.block_3(self.block_2(self.block_1(x)))))).transpose(1,2))
         most_5prime_out = x[:,0,:]
         kdeg_est = self.classifier(most_5prime_out)
         return kdeg_est
@@ -496,7 +496,7 @@ class ModSalukiCNN(nn.Module):
 
 
 
-simple_model = ModSalukiCNN(
+simple_model = SalukiCNN(
     input_shape = 6,
     hidden_units=12,
     seq_len = 12288
