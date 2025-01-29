@@ -145,9 +145,6 @@ test_tensor_3d = torch.tensor(np.array(tensors))
 train_targets = torch.tensor((train_data['log_kdeg_DMSO'].values - statistics.mean(train_data['log_kdeg_DMSO'].values)) / np.std(train_data['log_kdeg_DMSO'].values))
 test_targets = torch.tensor((test_data['log_kdeg_DMSO'].values - statistics.mean(test_data['log_kdeg_DMSO'].values)) / np.std(test_data['log_kdeg_DMSO'].values))
 
-# Normalize
-
-
 ### Create DataLoader
 
 train = data_utils.TensorDataset(train_tensor_3d.permute(0, 2, 1).float().to(device), train_targets.float().to(device))
@@ -498,7 +495,7 @@ class ModSalukiCNN(nn.Module):
 
 simple_model = SalukiCNN(
     input_shape = 6,
-    hidden_units=12,
+    hidden_units=64,
     seq_len = 12288
 ).to(device)
 
@@ -513,7 +510,7 @@ optimizer = torch.optim.Adam(
 )
 
 
-epochs = 15
+epochs = 20
 
 train_losses = [0]*epochs
 test_losses = [0]*epochs
