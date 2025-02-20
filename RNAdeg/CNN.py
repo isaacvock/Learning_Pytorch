@@ -159,6 +159,9 @@ test_loader = data_utils.DataLoader(test, batch_size = 64, shuffle=True)
 train_features_batch, train_labels_batch = next(iter(train_loader))
 train_features_batch.shape, train_labels_batch.shape
 
+test_features_batch, test_labels_batch = next(iter(test_loader))
+
+
 seq, label = train_features_batch[1], train_labels_batch[1]
 
 
@@ -615,11 +618,16 @@ plt.scatter(list(range(epochs)),
 plt.show()
 
 
+##### Captum
+from captum.attr import IntegratedGradients
+from captum.attr import LayerConductance
+from captum.attr import NeuronConductance
 
+ig = IntegratedGradients(simple_model)
 
-
-
-
+test_features_batch.requires_grad_()
+attr, delta = ig.attribute(test_features_batch.transpose(1,2),target=1, return_convergence_delta=True)
+attr = attr.detach().numpy()
 
 ##### ME HACKING AROUND
 
