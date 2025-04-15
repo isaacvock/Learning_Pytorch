@@ -2,6 +2,49 @@
 ## Practice using Captum to interpret ML models
 
 
+
+##### Getting started - Titantic Data #####
+
+import numpy as np
+import torch
+
+from captum.attr import IntegratedGradients
+from captum.attr import LayerConductance
+from captum.attr import NeuronConductance
+
+import matplotlib
+import matplotlib.pyplot as plt
+
+from scipy import stats
+import pandas as pd
+
+dataset_path = "C:/Users/isaac/Documents/ML_pytorch/Data/Captum/titanic3.csv"
+titanic_data = pd.read_csv(dataset_path)
+
+titanic_data = pd.concat([titanic_data,
+                          pd.get_dummies(titanic_data['sex']),
+                          pd.get_dummies(titanic_data['embarked'], prefix = "embark"),
+                          pd.get_dummies(titanic_data['pclass'], prefix="class")], axis = 1)
+
+titanic_data["age"] = titanic_data["age"].fillna(titanic_data["age"].mean())
+titanic_data["fare"] = titanic_data["fare"].fillna(titanic_data["fare"].mean())
+titanic_data = titanic_data.drop(['name','ticket','cabin','boat','body','home.dest','sex','embarked','pclass'], axis=1)
+
+
+np.random.seed(131254)
+labels = titanic_data["survived"].to_numpy()
+titanic_data = titanic_data.drop(['survived'], axis = 1)
+feature_names = list(titanic_data.columns)
+data = titanic_data.to_numpy()
+
+# Train-test split
+train_indices = np.random.choice(len(labels), int(0.7*len(labels)), replace = False)
+test_indices = list(set(range(len(labels))) - set(train_indices))
+train_features = np.array(data[train_indices], dtype = float)
+train_labels = labels[train_indices]
+test_features = np.array(data[test_indices], dtype = float)
+test_labels = labels[test_indices]
+
 ##### CAPTUM BASIC TEST #####
 
 import numpy as np
