@@ -30,7 +30,7 @@ titanic_data["age"] = titanic_data["age"].fillna(titanic_data["age"].mean())
 titanic_data["fare"] = titanic_data["fare"].fillna(titanic_data["fare"].mean())
 titanic_data = titanic_data.drop(['name','ticket','cabin','boat','body','home.dest','sex','embarked','pclass'], axis=1)
 
-
+# Convert to NumPy arrays
 np.random.seed(131254)
 labels = titanic_data["survived"].to_numpy()
 titanic_data = titanic_data.drop(['survived'], axis = 1)
@@ -44,6 +44,98 @@ train_features = np.array(data[train_indices], dtype = float)
 train_labels = labels[train_indices]
 test_features = np.array(data[test_indices], dtype = float)
 test_labels = labels[test_indices]
+
+# Model
+import torch
+import torch.nn as nn
+torch.manual_seed(1)
+
+class TitanicSimpleNNModel(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.lin1 = nn.Linear(12, 12)
+        self.sig1 = nn.Sigmoid()
+        
+        self.lin2 = nn.Linear(12, 8)
+        self.sig2 = nn.Sigmoid()
+
+        self.lin3 = nn.Linear(8, 2)
+        self.softmax = nn.Softmax(dim = 1)
+
+    def forward(self, input):
+        return self.softmax(self.lin3(self.sig2(self.lin2(self.sig1(self.lin1(input))))))
+
+
+simple_model = TitanicSimpleNNModel()
+
+simple_model(torch.from_numpy(test_features).float())
+
+### Train that shit!
+
+criterion = nn.CrossEntropyLoss()
+num_epochs = 200
+optimizer = torch.optim.Adam(
+    params=simple_model.parameters(),
+    betas=(0.9, 0.98)
+)
+
+
+train_losses = [0]*num_epochs
+test_losses = [0]*num_epochs
+
+
+# Convert to Pytorch tensors
+input_tensor = torch.from_numpy(train_features).type(torch.FloatTensor)
+label_tensor = torch.from_numpy(train_labels)
+
+test_input_tensor = torch.from_numpy(test_features).float()
+test_label_tensor = torch.from_numpy(test_labels)
+
+simple_model().train()
+for i in range(num_epochs):
+
+    optimizer.zero_grad()
+    yest = simple_model(input_tensor)
+    loss = criterion(yest, label_tensor)
+    train_losses[i] = loss.to('cpu').detach().numpy()
+
+    loss.backward()
+
+    optimizer.step()
+
+    simple_model.eval()
+
+    yest_test = simple_model(test_input_tensor)
+    test_loss = criterion(yest_test, test_label_tensor)
+    test_losses[i] = test_loss.to('cpu').detach().numpy()
+
+
+
+### Aside: assess model ###
+
+import matplotlib.pyplot as plt
+
+plt.scatter(
+    np.array(range(num_epochs)),
+    train_losses
+)
+plt.xlabel("Epoch")
+plt.ylabel("Train loss")
+plt.show()
+    
+
+plt.scatter(
+    np.array(range(num_epochs)),
+    test_losses
+)
+plt.xlabel("Epoch")
+plt.ylabel("Test loss")
+plt.show()
+
+
+### 
+
 
 ##### CAPTUM BASIC TEST #####
 
